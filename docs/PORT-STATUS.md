@@ -1,3 +1,6 @@
+> Note: addresses appear as `<switch-ip>` / `<pc-ip>` and some paths as the
+> original developer's; this is a raw log from one development machine.
+
 # Kodi on Nintendo Switch â€” port status
 
 ## Working on hardware
@@ -60,8 +63,8 @@
 - Stage:  `wsl -d Ubuntu -u kidbu -- bash /mnt/c/dev/kodi-switch/wsl-stage-sd.sh`
 - Push:   `wsl -d Ubuntu -u kidbu -- bash /mnt/c/dev/kodi-switch/wsl-push-now.sh`
   (hbmenu full-memory via R on eShop/NSO, then press **Y** for netloader)
-- Trace:  `nc 192.168.1.191 9998`
-- Quit:   `printf 'quit\n' | nc 192.168.1.191 9998`
+- Trace:  `nc <switch-ip> 9998`
+- Quit:   `printf 'quit\n' | nc <switch-ip> 9998`
 - SD logs: `/switch/kodi/boot.log`, `/switch/kodi/temp/kodi.log`
 
 ## Key overlay changes
@@ -1600,14 +1603,14 @@ needed a reboot).
 
 To apply next session, one of:
   a) start script.pyprobe early after a fresh boot, then copy the zip from
-     http://192.168.1.234:8002/ and unzip over
+     http://<pc-ip>:8002/ and unzip over
      /switch/kodi/.kodi/addons/plugin.video.watchnixtoons2
   b) or install the packaged zip through Kodi's GUI "Install from zip" once a file
      source for the PC share exists
 
 ## 2026-11-12 18:05 - CRASH after ~30 s of HEVC playback over HTTP: diagnosed and fixed
 
-Symptom: playback of One Pace S18E01 (1080p, 10-bit HEVC) over http://192.168.1.234:8003
+Symptom: playback of One Pace S18E01 (1080p, 10-bit HEVC) over http://<pc-ip>:8003
 ran for roughly half a minute, then Atmosphère showed a crash screen. No crash report
 was written (newest /atmosphere/crash_reports/*.log was 15:30, i.e. hours earlier), so
 the process died without a fault report.
@@ -1807,7 +1810,7 @@ into a recoverable event - but the heap is the actual fix.
 
 ## 2026-11-12 19:40 - SOLVED: HEVC over HTTP now plays continuously (1.007x)
 
-Measured on build d9ad2e55, one file over http://192.168.1.234:8003 for 4m41s:
+Measured on build d9ad2e55, one file over http://<pc-ip>:8003 for 4m41s:
   sample 1: pos 130.8s 19:36:04
   sample 2: pos 161.0s 19:36:34
   sample 3: pos 191.2s 19:37:04
@@ -1996,7 +1999,7 @@ Two changes, both in overlay/xbmc/filesystem/CurlFile.cpp:
   2. SO_RCVBUF 256 KB -> 128 KB: halves each socket's reservation (~2 MB/s / 16 Mbps, which
      is ample for streaming) at the cost of some peak throughput.
 
-Measured with a 3x play -> stop -> play sequence over http://192.168.1.234:8003.
+Measured with a 3x play -> stop -> play sequence over http://<pc-ip>:8003.
 
 ## 2026-11-12 22:05 - Pluto TV: add-on-level failure, network is fine
 

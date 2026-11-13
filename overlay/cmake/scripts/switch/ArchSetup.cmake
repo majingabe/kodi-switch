@@ -48,12 +48,26 @@ set(ENABLE_AVAHI OFF CACHE BOOL "" FORCE)
 set(ENABLE_AIRTUNES OFF CACHE BOOL "" FORCE)
 set(ENABLE_UPNP OFF CACHE BOOL "" FORCE)
 set(ENABLE_PYTHON ON CACHE BOOL "" FORCE)
-# Cross-built CPython 3.14 for Horizon (see wsl-build-python.sh / wsl-make-python-prefix.sh).
+
+# Root of the project-local prefixes: the cross-built CPython 3.14, the ISA build
+# tree and the deps. Override with -DSWITCH_PREFIX=/path or the SWITCH_PREFIX
+# environment variable. The default keeps a checkout named "kodi-switch" in $HOME
+# building unchanged, which is how it was developed.
+if(NOT DEFINED SWITCH_PREFIX)
+  if(DEFINED ENV{SWITCH_PREFIX})
+    set(SWITCH_PREFIX "$ENV{SWITCH_PREFIX}" CACHE PATH "root of project-local prefixes")
+  else()
+    set(SWITCH_PREFIX "$ENV{HOME}/kodi-switch" CACHE PATH "root of project-local prefixes")
+  endif()
+endif()
+message(STATUS "Switch port: SWITCH_PREFIX = ${SWITCH_PREFIX}")
+
+# Cross-built CPython 3.14 for Horizon (see scripts/README.md).
 set(Python3_EXECUTABLE "/usr/bin/python3" CACHE FILEPATH "" FORCE)
-set(Python3_LIBRARY "/home/kidbu/kodi-switch/python-prefix/lib/libpython3.14.a" CACHE FILEPATH "" FORCE)
-set(Python3_LIBRARIES "/home/kidbu/kodi-switch/python-prefix/lib/libpython3.14.a" CACHE FILEPATH "" FORCE)
-set(Python3_INCLUDE_DIR "/home/kidbu/kodi-switch/python-prefix/include/python3.14" CACHE PATH "" FORCE)
-set(Python3_INCLUDE_DIRS "/home/kidbu/kodi-switch/python-prefix/include/python3.14" CACHE PATH "" FORCE)
+set(Python3_LIBRARY "${SWITCH_PREFIX}/python-prefix/lib/libpython3.14.a" CACHE FILEPATH "" FORCE)
+set(Python3_LIBRARIES "${SWITCH_PREFIX}/python-prefix/lib/libpython3.14.a" CACHE FILEPATH "" FORCE)
+set(Python3_INCLUDE_DIR "${SWITCH_PREFIX}/python-prefix/include/python3.14" CACHE PATH "" FORCE)
+set(Python3_INCLUDE_DIRS "${SWITCH_PREFIX}/python-prefix/include/python3.14" CACHE PATH "" FORCE)
 set(Python3_VERSION "3.14" CACHE STRING "" FORCE)
 set(Python3_VERSION_MAJOR "3" CACHE STRING "" FORCE)
 set(Python3_VERSION_MINOR "14" CACHE STRING "" FORCE)
@@ -92,16 +106,16 @@ list(APPEND DEPLIBS nx)
 
 # Second pass over libpython: its statically linked extension modules sit after
 # the objects that reference them, so a single archive scan misses them.
-link_directories("/home/kidbu/kodi-switch/python-prefix/lib")
+link_directories("${SWITCH_PREFIX}/python-prefix/lib")
 list(APPEND DEPLIBS python3.14)
 
 # inputstream.adaptive is linked statically: Horizon has no dlopen(), so binary
 # add-ons cannot be loaded at runtime. PlatformSwitch.cpp shims dlopen/dlsym to
 # the add-on's three entry points. Bento4 and pugixml come from isa-deps.
-link_directories("/home/kidbu/kodi-switch/build-isa")
-link_directories("/home/kidbu/kodi-switch/build-isa/lib/mpegts")
-link_directories("/home/kidbu/kodi-switch/build-isa/lib/webm_parser")
-link_directories("/home/kidbu/kodi-switch/isa-deps/lib")
+link_directories("${SWITCH_PREFIX}/build-isa")
+link_directories("${SWITCH_PREFIX}/build-isa/lib/mpegts")
+link_directories("${SWITCH_PREFIX}/build-isa/lib/webm_parser")
+link_directories("${SWITCH_PREFIX}/isa-deps/lib")
 list(APPEND DEPLIBS inputstream.adaptive mpegts webm_parser ap4 pugixml)
 
 # ffmpeg's DASH demuxer needs libxml2; static ffmpeg archives do not carry their
