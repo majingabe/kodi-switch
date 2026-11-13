@@ -5,11 +5,16 @@
 # 64 KB and still kill hbloader with an instruction abort. Upload to a temp
 # name, download the whole thing again, compare MD5, and only then swap it in.
 set -uo pipefail
+
+# Paths (override with environment variables if yours differ)
+KODI_ROOT="${KODI_ROOT:-$HOME/kodi-switch}"      # build tree root (kodi/, build-kodi/, package/)
+DEV_DIR="${DEV_DIR:-$HOME/kodi-switch}"         # where these scripts live
+SRC_DIR="${SRC_DIR:-$KODI_ROOT}"                # project source root (overlay/, docs/)
 IP=${1:-192.168.1.191}
 BASE="ftp://$IP:5000"
-LOCAL=${2:-/home/kidbu/kodi-switch/package/kodi.nro}
+LOCAL=${2:-${KODI_ROOT}/package/kodi.nro}
 TMP=kodi-upload.nro
-OUT=/mnt/c/dev/kodi-switch/from-switch
+OUT=${DEV_DIR}/from-switch
 mkdir -p "$OUT"
 
 want=$(md5sum "$LOCAL" | cut -d' ' -f1)

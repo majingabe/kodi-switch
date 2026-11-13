@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -o pipefail
-SRC=/home/kidbu/kodi-switch/portlibs
+
+# Paths (override with environment variables if yours differ)
+FFMPEG_BUILD="${FFMPEG_BUILD:-$HOME/ffmpeg-build}"  # ffmpeg source/build scratch dir
+KODI_ROOT="${KODI_ROOT:-$HOME/kodi-switch}"      # build tree root (kodi/, build-kodi/, package/)
+DEV_DIR="${DEV_DIR:-$HOME/kodi-switch}"         # where these scripts live
+SRC_DIR="${SRC_DIR:-$KODI_ROOT}"                # project source root (overlay/, docs/)
+SRC=${KODI_ROOT}/portlibs
 DST=/opt/devkitpro/portlibs/switch
 
 echo '=== backing up original ffmpeg libs (once) ==='

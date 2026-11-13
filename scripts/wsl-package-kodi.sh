@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILD=/home/kidbu/kodi-switch/build-kodi
-SRC=/home/kidbu/kodi-switch/kodi
-OUT=/home/kidbu/kodi-switch/package
+# Paths (override with environment variables if yours differ)
+KODI_ROOT="${KODI_ROOT:-$HOME/kodi-switch}"      # build tree root (kodi/, build-kodi/, package/)
+DEV_DIR="${DEV_DIR:-$HOME/kodi-switch}"         # where these scripts live
+SRC_DIR="${SRC_DIR:-$KODI_ROOT}"                # project source root (overlay/, docs/)
+
+BUILD=${KODI_ROOT}/build-kodi
+SRC=${KODI_ROOT}/kodi
+OUT=${KODI_ROOT}/package
 TOOLS=/opt/devkitpro/tools/bin
 
 if [ ! -x "$BUILD/kodi.bin" ]; then
@@ -44,7 +49,7 @@ fi
 cp -a "$SRC/media" "$OUT/kodi/media"
 
 # CPython standard library, for the Python add-on support (PYTHONHOME=/switch/kodi/python).
-PYLIB=/home/kidbu/kodi-switch/pybuild/Python-3.14.6/Lib
+PYLIB=${KODI_ROOT}/pybuild/Python-3.14.6/Lib
 if [ -d "$PYLIB" ]; then
   mkdir -p "$OUT/kodi/python/lib"
   cp -a "$PYLIB" "$OUT/kodi/python/lib/python3.14"

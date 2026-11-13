@@ -1,28 +1,46 @@
 #!/usr/bin/env bash
+# Copy overlay/ into the Kodi source tree and force a rebuild of every patched file.
+#
+# Usage:  ./wsl-apply-overlay.sh
+# Env:    KODI_DIR  (default: $HOME/kodi-switch/kodi)   Kodi source checkout
+#         OVERLAY   (default: ../overlay)               this repo's overlay dir
 set -euo pipefail
 
-cp -a "/mnt/c/Users/kidbu/OneDrive/Documents/Default Project/kodi-switch/overlay/." \
-      /home/kidbu/kodi-switch/kodi/
+# Paths (override with environment variables if yours differ)
+KODI_ROOT="${KODI_ROOT:-$HOME/kodi-switch}"      # build tree root (kodi/, build-kodi/, package/)
+DEV_DIR="${DEV_DIR:-$HOME/kodi-switch}"         # where these scripts live
+SRC_DIR="${SRC_DIR:-$KODI_ROOT}"                # project source root (overlay/, docs/)
 
-# cp -a preserves the Windows file times. If an overlay file's timestamp is older
-# than its object file, ninja decides it is up to date and never recompiles it -
-# which silently shipped stale platform code more than once. Touch everything the
-# overlay provides so every patched translation unit is rebuilt.
-OVL="/mnt/c/Users/kidbu/OneDrive/Documents/Default Project/kodi-switch/overlay"
-( cd "$OVL" && find . -type f -print0 | while IFS= read -r -d '' f; do
-    touch "/home/kidbu/kodi-switch/kodi/$f"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KODI_DIR="${KODI_DIR:-$HOME/kodi-switch/kodi}"
+OVERLAY="${OVERLAY:-$HERE/../overlay}"
+
+if [ ! -d "$KODI_DIR/xbmc" ]; then
+  echo "error: KODI_DIR does not look like a Kodi tree: $KODI_DIR" >&2
+  exit 1
+fi
+if [ ! -d "$OVERLAY" ]; then
+  echo "error: overlay not found: $OVERLAY" >&2
+  exit 1
+fi
+
+cp -a "$OVERLAY/." "$KODI_DIR/"
+
+# cp -a preserves the source timestamps. If an overlay file is older than the object
+# file built from it, ninja decides it is up to date and never recompiles it - which
+# silently shipped stale platform code more than once. Touch everything the overlay
+# provides so every patched translation unit is rebuilt.
+( cd "$OVERLAY" && find . -type f -print0 | while IFS= read -r -d '' f; do
+    touch "$KODI_DIR/$f"
   done )
-chown -R kidbu:kidbu /home/kidbu/kodi-switch/kodi/cmake \
-                     /home/kidbu/kodi-switch/kodi/xbmc/platform/switch \
-                     /home/kidbu/kodi-switch/kodi/xbmc/windowing/switch
 
-# The source tree came from a Windows checkout. The JSON-RPC generator embeds
-# input lines verbatim into C strings, so CRLF here breaks the generated header.
-SCHEMA=/home/kidbu/kodi-switch/kodi/xbmc/interfaces/json-rpc/schema
+# The source tree may come from a Windows checkout. The JSON-RPC generator embeds input
+# lines verbatim into C strings, so CRLF there breaks the generated header.
+SCHEMA="$KODI_DIR/xbmc/interfaces/json-rpc/schema"
 if [ -d "$SCHEMA" ]; then
   for f in version.txt license.txt methods.json types.json notifications.json; do
-    sed -i 's/\r$//' "$SCHEMA/$f"
+    [ -f "$SCHEMA/$f" ] && sed -i 's/\r$//' "$SCHEMA/$f"
   done
 fi
 
-echo "Overlay applied."
+echo "Overlay applied to $KODI_DIR"
