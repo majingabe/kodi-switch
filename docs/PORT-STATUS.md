@@ -238,7 +238,7 @@ the 14:15 relink (patched libpython installed into python-prefix/lib first)
 runs and answers JSON-RPC.
 
 ### Why every earlier Python build died
-Kodi links /home/kidbu/kodi-switch/python-prefix/lib/libpython3.14.a. That copy
+Kodi links <project-dir>/python-prefix/lib/libpython3.14.a. That copy
 was from 04:31, i.e. built BEFORE the entropy patch. The patched archive sat in
 pybuild/build-switch/ and was never installed. Py_Initialize aborted in
 _Py_HashRandomization_Init exactly where boot.log stopped.
@@ -515,7 +515,7 @@ wsl-apply-overlay.sh only copies files INTO the Kodi tree. Deleting a file from
 overlay/ does not restore the upstream version, so the first "clean" rebuild
 still contained the AddonInstaller instrumentation (identical md5 gave it away).
 Revert with:
-  cd /home/kidbu/kodi-switch/kodi && git checkout -- <path>
+  cd <project-dir>/kodi && git checkout -- <path>
 The Kodi tree IS a git checkout; `git status --short` shows every overlay file
 as modified, which is a handy way to audit what the overlay is changing.
 
@@ -575,7 +575,7 @@ After a Kodi restart all labels load and The Crew goes much further.
 Horizon has no dlopen, so binary add-ons cannot be loaded at runtime. Instead:
 - Built ISA's deps for aarch64-none-elf with a new CMake toolchain
   (C:\dev\kodi-switch\switch-toolchain.cmake): pugixml 1.16, nlohmann json
-  3.12.0, Bento4 1.6.0-641-6-Piers -> /home/kidbu/kodi-switch/isa-deps
+  3.12.0, Bento4 1.6.0-641-6-Piers -> <project-dir>/isa-deps
 - Built inputstream.adaptive 22.3.24 (Piers) as a STATIC library
   (-DBUILD_SHARED_LIBS=OFF) against KodiConfig.cmake from our build tree.
   Patches needed (patches/isa-switch-*.py):
@@ -1056,7 +1056,7 @@ kodi.log said it plainly once debug logging was on:
   ADDON: Could not locate inputstream.adaptive.a      (file was missing -> created it)
   Unable to load .../inputstream.adaptive.a, reason: dynamic loading unsupported
 
-The second message is not ours. /home/kidbu/kodi-switch/portlibs/include/dlfcn.h
+The second message is not ours. <project-dir>/portlibs/include/dlfcn.h
 (devkitPro portlibs, on the include path) defines:
 
   static inline void *dlopen(const char *f, int flags) { return 0; }
@@ -1383,7 +1383,7 @@ Known limits at wrap-up:
   Free sources     torrent-only in practice; debrid is the realistic route.
 
 General Horizon/libnx/ffmpeg/Kodi knowledge extracted from this port lives in:
-  C:\Users\kidbu\OneDrive\Documents\Default Project\AGENTS.md
+  <user>\OneDrive\Documents\Default Project\AGENTS.md
 (auto-loaded into future agent sessions in this workspace)
 
 ## 2026-11-12 14:20 - DASH diagnosed: ENOBUFS, the bsd buffer pool
@@ -1691,13 +1691,13 @@ Autostart of the PC media server (done, verified):
   with S4U and schtasks /create ONLOGON), so it uses the per-user Startup folder:
   %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Kodi Media Server.vbs
   -> launches python.exe (the binary the Windows Firewall allow-rule names) with
-     mediaserver.py 8003 C:\Users\kidbu\Videos, window hidden, logs to media-server.log
+     mediaserver.py 8003 <user>\Videos, window hidden, logs to media-server.log
   Verified by starting it exactly that way: 200 on /, 206 Range, log lines written.
 
 Second PC (no Python needed):
   C:\dev\kodi-switch\mediaserver.ps1  + start-mediaserver.bat
   Add-Type-compiled TcpListener server (HttpListener would need an admin urlacl).
-  Tested against C:\Users\kidbu\Videos on port 8013: directory listings (links now escape
+  Tested against <user>\Videos on port 8013: directory listings (links now escape
   names but keep the trailing slash), 206 with Content-Range, HEAD, 403 on ../ traversal,
   404 for missing files, 1 MB streaming chunks, per-request MB/s logging.
 
@@ -2072,5 +2072,5 @@ Root of the card:
   test-videos/                        only if it holds our test clips
 
 Already cleaned on the PC side:
-  C:\Users\kidbu\Videos was full of zips/py/xml from testing (they appeared in Kodi as
+  <user>\Videos was full of zips/py/xml from testing (they appeared in Kodi as
   "PC Videos"). All moved to C:\dev\kodi-switch\http\tmp-scripts.
