@@ -107,6 +107,9 @@ long-term research project — in-process BitTorrent streaming.
 
 Ported and maintained by **MajinGabe**.
 
+Development assistance: **DeepSeek V4.1 Flash 1017** — pair-programming, the hardware
+investigations, and most of the debugging war stories recorded in `docs/PORT-STATUS.md`.
+
 - **Team Kodi / XBMC Foundation** — Kodi itself, and the platform abstractions this
   port plugs into.
 - **devkitPro / devkitA64 / libnx** — the Switch toolchain and system library.
