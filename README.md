@@ -21,7 +21,7 @@ layer, and the real CPython interpreter — so normal Kodi add-ons and scrapers 
 - Hardware video decode (**NVDEC**) for HEVC, including **10-bit (Main 10)**
 - Software decode for everything else (H.264 and friends)
 - Audio through a native `CAESinkSwitch` (audout), stereo, 48 kHz
-- Input: both Joy-Cons / Pro Controller, both analog sticks, and touch
+- Input: buttons and D-pad on both Joy-Cons / Pro Controller, plus touch. **Analog sticks are not wired up yet** (see `docs/ROADMAP.md`)
 - CPython 3.14 embedded — standard Python add-ons install and run
 - `inputstream.adaptive` **built in and statically linked** (HLS with HTTPS)
 - JSON-RPC on port 9090 for remote control and automation
