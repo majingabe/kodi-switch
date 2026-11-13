@@ -10,7 +10,11 @@ SRC_DIR="${SRC_DIR:-$KODI_ROOT}"                # project source root (overlay/,
 source /etc/profile.d/devkit-env.sh
 export PATH="$DEVKITPRO/tools/bin:$PATH"
 
-IP="${1:-192.168.1.191}"
+IP="${1:-}"
+if [ -z "$IP" ]; then
+  echo "usage: $0 <switch-ip>" >&2
+  exit 2
+fi
 MODE="${2:-stream}"
 NRO=${KODI_ROOT}/package/kodi.nro
 

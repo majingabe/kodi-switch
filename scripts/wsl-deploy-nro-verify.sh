@@ -10,7 +10,11 @@ set -uo pipefail
 KODI_ROOT="${KODI_ROOT:-$HOME/kodi-switch}"      # build tree root (kodi/, build-kodi/, package/)
 DEV_DIR="${DEV_DIR:-$HOME/kodi-switch}"         # where these scripts live
 SRC_DIR="${SRC_DIR:-$KODI_ROOT}"                # project source root (overlay/, docs/)
-IP=${1:-192.168.1.191}
+IP="${1:-}"
+if [ -z "$IP" ]; then
+  echo "usage: $0 <switch-ip>" >&2
+  exit 2
+fi
 BASE="ftp://$IP:5000"
 LOCAL=${2:-${KODI_ROOT}/package/kodi.nro}
 TMP=kodi-upload.nro
