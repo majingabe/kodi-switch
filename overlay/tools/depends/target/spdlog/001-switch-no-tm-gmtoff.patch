@@ -1,0 +1,16 @@
+--- a/include/spdlog/details/os-inl.h
++++ b/include/spdlog/details/os-inl.h
+@@ -263,7 +263,13 @@
+ #else
+ // On unix simply use tm_gmtoff
+ SPDLOG_INLINE int utc_minutes_offset(const std::tm &tm) {
++#if defined(__SWITCH__)
++    // newlib's struct tm does not expose tm_gmtoff.
++    (void)tm;
++    return 0;
++#else
+     return static_cast<int>(tm.tm_gmtoff / 60);
++#endif
+ }
+ #endif  // _WIN32
+ #endif  // SPDLOG_NO_TZ_OFFSET

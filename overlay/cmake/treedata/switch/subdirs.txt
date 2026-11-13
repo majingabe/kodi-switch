@@ -1,0 +1,10 @@
+xbmc/platform/posix                 platform/posix
+xbmc/platform/posix/filesystem      platform/posix/filesystem
+xbmc/platform/posix/network         platform/posix/network
+xbmc/platform/posix/threads         platform/posix/threads
+xbmc/platform/posix/utils           platform/posix/utils
+xbmc/platform/switch                platform/switch
+xbmc/windowing/switch               windowing/switch
+xbmc/input/touch                    input/touch
+xbmc/input/touch/generic            input/touch/generic
+xbmc/cores/RetroPlayer/shaders/gles cores/RetroPlayer/shaders/gles

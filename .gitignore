@@ -1,0 +1,20 @@
+# build products
+build*/
+package/
+*.nro
+*.elf
+*.nacp
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/
+.idea/
+
+# local notes that should not become history
+*.log
+boot.log
+kodi.old.log
+media-server.log

@@ -1,0 +1,132 @@
+/*
+ *  Copyright (C) 2005-2018 Team Kodi
+ *  This file is part of Kodi - https://kodi.tv
+ *
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *  See LICENSES/README.md for more information.
+ */
+
+#include "SoLoader.h"
+
+#include "filesystem/SpecialProtocol.h"
+#include "utils/URIUtils.h"
+#include "utils/log.h"
+
+#if defined(TARGET_DARWIN_EMBEDDED)
+#include "platform/darwin/ios-common/DarwinEmbedUtils.h"
+#endif
+
+#include <dlfcn.h>
+
+#if defined(TARGET_SWITCH)
+// devkitPro's portlibs <dlfcn.h> defines dlopen/dlsym/dlclose/dlerror as
+// *inline* stubs ("dynamic loading unsupported"), which would bind every call
+// here to the stub and never reach the real implementations in
+// PlatformSwitch.cpp. Calls are redirected to explicitly named functions.
+extern "C" void* switch_dlopen(const char* file, int mode);
+extern "C" void* switch_dlsym(void* handle, const char* name);
+extern "C" int switch_dlclose(void* handle);
+extern "C" char* switch_dlerror(void);
+
+#define dlopen switch_dlopen
+#define dlsym switch_dlsym
+#define dlclose switch_dlclose
+#define dlerror switch_dlerror
+#endif
+
+SoLoader::SoLoader(const std::string &so, bool bGlobal) : LibraryLoader(so)
+{
+  m_soHandle = NULL;
+  m_bGlobal = bGlobal;
+  m_bLoaded = false;
+}
+
+SoLoader::~SoLoader()
+{
+  if (m_bLoaded)
+    Unload();
+}
+
+bool SoLoader::Load()
+{
+  if (m_soHandle != NULL)
+    return true;
+
+  const std::string strFileName = CSpecialProtocol::TranslatePath(GetFileName());
+  if (strFileName == "xbmc.so")
+  {
+    CLog::Log(LOGDEBUG, "Loading Internal Library");
+    m_soHandle = RTLD_DEFAULT;
+  }
+  else
+  {
+    if (!PerformLoad(strFileName))
+    {
+#if defined(TARGET_DARWIN_EMBEDDED)
+      if (!PerformLoad(CDarwinEmbedUtils::GetSharedLibraryPath(strFileName)))
+        return false;
+#else
+      return false;
+#endif
+    }
+  }
+  m_bLoaded = true;
+  return true;
+}
+
+void SoLoader::Unload()
+{
+  if (m_soHandle)
+  {
+    if (dlclose(m_soHandle) != 0)
+      CLog::Log(LOGERROR, "Unable to unload {}, reason: {}", GetName(), dlerror());
+  }
+  m_bLoaded = false;
+  m_soHandle = NULL;
+}
+
+int SoLoader::ResolveExport(const char* symbol, void** f, bool logging)
+{
+  if (!m_bLoaded && !Load())
+  {
+    if (logging)
+      CLog::Log(LOGWARNING, "Unable to resolve: {} {}, reason: so not loaded", GetName(), symbol);
+    return 0;
+  }
+
+  void* s = dlsym(m_soHandle, symbol);
+  if (!s)
+  {
+    if (logging)
+      CLog::Log(LOGWARNING, "Unable to resolve: {} {}, reason: {}", GetName(), symbol, dlerror());
+    return 0;
+  }
+
+  *f = s;
+  return 1;
+}
+
+bool SoLoader::IsSystemDll()
+{
+  return false;
+}
+
+HMODULE SoLoader::GetHModule()
+{
+  return m_soHandle;
+}
+
+bool SoLoader::HasSymbols()
+{
+  return false;
+}
+
+bool SoLoader::PerformLoad(const std::string& libPath)
+{
+  CLog::Log(LOGDEBUG, "Loading: {}", libPath);
+  const int flags = RTLD_LAZY;
+  m_soHandle = dlopen(libPath.c_str(), flags);
+  if (m_soHandle == nullptr)
+    CLog::Log(LOGERROR, "Unable to load {}, reason: {}", libPath, dlerror());
+  return m_soHandle != nullptr;
+}
