@@ -1620,7 +1620,17 @@ void SwitchPlaybackGuard(CApplicationPlayer* appPlayer)
       codec == "hevc" || codec == "h265" || codec == "av1" || codec == "vp9";
 
   // 1. Known impossible: 4K of anything, or a heavy codec above 720p.
-  if (info.valid && !dataCache.IsVideoHwDecoder() &&
+  //
+  // Only refuse once the video is actually running. Measured on hardware with One
+  // Pace S18E01 (1080p 10-bit HEVC): boot.log showed "NVTEGRA device rc=0" and then
+  // "playback guard: unsupported video, stopping" *before* "NVTEGRA format selected"
+  // - the guard fired while avcodec_open2 was still running, IsVideoHwDecoder() was
+  // still false, and it killed a stream NVDEC handles perfectly. That open takes
+  // over ten seconds for this file (815 MB over a slow-starting stream), so a fixed
+  // grace period is not enough: a file whose clock has not advanced has not started
+  // playing and cannot be judged too slow.
+  constexpr int64_t kMinPlayTimeMs = 5000;
+  if (info.valid && !dataCache.IsVideoHwDecoder() && appPlayer->GetTime() > kMinPlayTimeMs &&
       (pixels > 1920LL * 1080 || (heavyCodec && pixels > 1280LL * 720)))
   {
     std::string what = codec.empty() ? "This video" : codec;

@@ -2260,3 +2260,41 @@ but it must be validated by hand, not by the script, before it ships.
 
 Only real defect reported: one "One Pace" file that had to have its file type fixed
 to play - unrelated to playback plumbing.
+
+## 2026-11-14 - The guard was killing a file NVDEC plays: it judged before playback started
+
+One Pace S18E01 (1080p 10-bit HEVC, 815 MB MKV over HTTP) was refused with
+"HEVC at 1920x1080 decodes slower than real time". The file is fine.
+
+**Evidence from boot.log**, same file, two builds:
+
+```
+before:  NVTEGRA device rc=0
+         playback guard: unsupported video, stopping
+         (no "NVTEGRA format selected" line at all)
+
+after:   NVTEGRA device rc=0
+         NVTEGRA format selected (hardware decode)
+         NVTEGRA P010->NV12 scaler ready
+         NVTEGRA: codec ctx advertised as NV12
+```
+
+So the hardware device was created successfully both times; the guard simply ran
+while `avcodec_open2` was still in flight, saw `IsVideoHwDecoder() == false`, and
+stopped the stream. That open takes **more than ten seconds** for this file, which
+is why a first attempt with a 10-second grace period still failed intermittently -
+`NVTEGRA format selected` appeared *after* the guard line in the log.
+
+**Fix (`overlay/xbmc/application/Application.cpp`, SwitchPlaybackGuard).** Rule 1 now
+requires `appPlayer->GetTime() > 5000` before refusing: a stream whose clock has not
+advanced has not started playing and cannot be judged too slow. The starved-decoder
+backstop (queue 0-1 for 8 consecutive seconds) is unchanged and still catches files
+that genuinely cannot keep up.
+
+**Verified on hardware.** The same MKV now plays with hardware decode; percentage
+advanced 0.26% -> 6.71% over two minutes at speed 1, and the user confirmed video and
+audio are correct.
+
+Lesson: a "known impossible" heuristic must never fire before playback has actually
+begun. Fast-opening files hid this for a long time because the flag was set before
+the first one-second tick.
