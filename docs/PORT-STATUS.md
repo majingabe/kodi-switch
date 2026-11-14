@@ -2227,3 +2227,36 @@ the v22.0rc1 baseline is being tested by hand to decide.
 
 **Also open:** `Addons33.db` reports `SQLITE_CORRUPT` on every start, so add-on
 repository queries fail. Needs the database rebuilt.
+
+## 2026-11-14 (later) - Hand test of v22.0rc1: it works. The "bugs" were my harness.
+
+Rolled the console back to the released `v22.0rc1` NRO (sha256 8ab41dbd...) and had
+the user drive it by hand rather than by script:
+
+- dragonball supercut: play, exit, play again, seek forward an hour, back out,
+  resume where it left off - no hiccups
+- WatchNixtoons stream: stopped it, replayed **within 5 seconds** - no failure
+- exit from the forwarder: immediate, as advertised
+
+So the shipped build behaves correctly, and the failures reproduced earlier today
+were produced by the test method, not by normal use. The harness stops playback with
+a hard `Player.Stop` over JSON-RPC **mid-stream**; a person pressing stop/back closes
+the stream cleanly. That difference is what left the busy dialog up and what put the
+negative entry in the directory cache.
+
+Lesson worth keeping: when a "bug" appears and disappears across builds that differ
+only by trace lines, suspect the harness before the code. Two of today's three
+"regressions" were that.
+
+The harness is specifically hostile in two ways: it polls `Player.GetProperties`
+every 2 seconds *during* playback, and it ends playback with a hard `Player.Stop`
+mid-stream. On a console with ~9 sockets and a small heap, both are load a person
+never applies. Any future playback test should let the file play without polling,
+and stop it the way the UI does.
+
+The `File.cpp` directory-cache change is still a defensible hardening (the trace
+proved the negative entry exists and that Open refuses without any network access),
+but it must be validated by hand, not by the script, before it ships.
+
+Only real defect reported: one "One Pace" file that had to have its file type fixed
+to play - unrelated to playback plumbing.
