@@ -2332,3 +2332,21 @@ hardware: the UI clock now reads 14:57 local.
   (The clock, memory and OS name in that same screenshot are correct.)
 - OS name was "Unknown OS" because neither `GetOsName()` nor `GetOsVersionInfo()` had
   a Switch branch. Now "Atmosphère on Horizon" when `/atmosphere` exists.
+
+## 2026-11-14 - Screen dimmed mid-film: Horizon was never told media was playing
+
+Symptom: while watching a video the panel dimmed to its low brightness, and touching
+the screen or waking a controller brought it back. Most noticeable when a controller
+powered off, because controller input was the only activity the console was counting.
+
+Cause: the dimming is Horizon's own inactivity behaviour. A video application is
+expected to call `appletSetMediaPlaybackState(true)` while it plays, which suppresses
+the system's dim/auto-sleep timer; the port never sent it.
+
+Fix (`overlay/xbmc/application/Application.cpp`, SwitchPlaybackGuard): set the flag when
+video playback starts and clear it when playback stops or pauses, so normal dim/sleep
+behaviour returns outside playback. Traced as `media playback state: on` / `off`.
+Verified the flag is sent during playback; the dimming behaviour itself is being
+confirmed by hand.
+
+Not covered: audio-only playback still lets the console dim.

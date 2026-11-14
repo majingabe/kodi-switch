@@ -11,6 +11,7 @@
 #if defined(TARGET_SWITCH)
 extern "C" void switch_trace(const char* msg);
 #include <malloc.h> // mallinfo(), used by the playback guard's memory trace
+#include <switch.h> // appletSetMediaPlaybackState(), suppresses Horizon's dim timer
 #endif
 
 #include "Autorun.h"
@@ -1578,12 +1579,29 @@ void SwitchPlaybackGuard(CApplicationPlayer* appPlayer)
     return;
   nextCheck = now + 1s;
 
+#if defined(TARGET_SWITCH)
+  // Horizon dims the panel on its own inactivity timer, and a video application is
+  // expected to declare that media is playing so it does not. Without this the screen
+  // dimmed mid-film - noticed when a controller powered off, because that was the only
+  // input the console was counting. The flag must be cleared on stop as well, or the
+  // console never sleeps again.
+  static bool mediaPlaying = false;
+#endif
+
   if (!appPlayer || !appPlayer->IsPlayingVideo() || appPlayer->IsPausedPlayback())
   {
     lastPlayTime = -1;
     playingSeconds = 0;
     starvedSeconds = 0;
     stopping = false;
+#if defined(TARGET_SWITCH)
+    if (mediaPlaying)
+    {
+      appletSetMediaPlaybackState(false);
+      mediaPlaying = false;
+      switch_trace("media playback state: off");
+    }
+#endif
     return;
   }
 
@@ -1591,6 +1609,15 @@ void SwitchPlaybackGuard(CApplicationPlayer* appPlayer)
     return;
 
   ++playingSeconds;
+
+#if defined(TARGET_SWITCH)
+  if (!mediaPlaying)
+  {
+    appletSetMediaPlaybackState(true);
+    mediaPlaying = true;
+    switch_trace("media playback state: on");
+  }
+#endif
 
 #if defined(TARGET_SWITCH)
   // Measure before guessing about crashes: heap state once every 5 s while a
