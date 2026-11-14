@@ -76,7 +76,16 @@ std::tuple<bool, int64_t> GetTimezoneBias(const SystemTime& time)
     return {false, 0}; // error
 
 #if defined(TARGET_SWITCH)
-  return {true, 0};
+  // newlib's struct tm has no tm_gmtoff and no timegm(), and an earlier version of
+  // this port returned 0 here - which told Kodi "local time is UTC" and made the
+  // clock show UTC (six hours ahead of local, same minutes). Derive the bias by
+  // converting the broken-down local fields to an epoch as if they were UTC, using
+  // the standard civil-date algorithm, and comparing with the real epoch.
+  const int64_t days = days_from_civil(static_cast<int64_t>(tms.tm_year) + 1900,
+                                       static_cast<unsigned>(tms.tm_mon) + 1,
+                                       static_cast<unsigned>(tms.tm_mday));
+  const int64_t asIfUtc = days * 86400 + tms.tm_hour * 3600 + tms.tm_min * 60 + tms.tm_sec;
+  return {true, (static_cast<int64_t>(t) - asIfUtc) / 60};
 #else
   return {true, -tms.tm_gmtoff / 60};
 #endif
@@ -150,7 +159,15 @@ int SystemTimeToFileTime(const SystemTime* systemTime, FileTime* fileTime)
 #endif
 
 #if defined(TARGET_SWITCH)
-  time_t t = mktime(&sysTime);
+  // newlib has no timegm(). This used to call mktime(), which reads the fields as
+  // *local* time and shifted every timestamp by the UTC offset - that is exactly why
+  // the UI clock showed 20:46 for 14:46 while localtime() itself was correct.
+  // Interpret the broken-down time as UTC, which is what timegm() does.
+  const int64_t days = days_from_civil(static_cast<int64_t>(sysTime.tm_year) + 1900,
+                                       static_cast<unsigned>(sysTime.tm_mon) + 1,
+                                       static_cast<unsigned>(sysTime.tm_mday));
+  time_t t = static_cast<time_t>(days * 86400 + sysTime.tm_hour * 3600 +
+                                 sysTime.tm_min * 60 + sysTime.tm_sec);
 #elif defined(TARGET_ANDROID) && !defined(__LP64__)
   time64_t t = timegm64(&sysTime);
 #else

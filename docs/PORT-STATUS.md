@@ -2298,3 +2298,37 @@ audio are correct.
 Lesson: a "known impossible" heuristic must never fire before playback has actually
 begun. Fast-opening files hid this for a long time because the flag was set before
 the first one-second tick.
+
+## 2026-11-14 - The clock was 6 hours ahead: our own mktime() substitution
+
+Correction to the 2026-11-12 entry that blamed a missing TZ. TZ was fine: inside
+Kodi, `time.ctime()` reported 14:46 local and `tzname` was ('CST','CDT'), while the
+UI clock showed 20:46 - same minutes, hours offset by the UTC delta. So the libc was
+right and Kodi's conversion was wrong.
+
+Two port-local substitutions were responsible:
+
+1. `xbmc/platform/posix/XTimeUtils.cpp`, `SystemTimeToFileTime()`: every other
+   platform calls `timegm()` because the struct is defined as **UTC**. Switch called
+   `mktime()`, which reads the same fields as *local* time, shifting every timestamp
+   by the UTC offset. Fixed with an explicit civil-date -> epoch conversion (newlib
+   has no timegm).
+2. The same file's `GetTimezoneBias()` returned a hardcoded 0 on Switch (no
+   `tm_gmtoff` in newlib), so `GetUTCDateTime()` could not compensate. Now derived by
+   converting the broken-down local fields as if UTC and comparing with the real
+   epoch.
+
+Both are needed and they are consistent: local fields are stored as if UTC (Kodi's
+model), and the bias converts back to true UTC where Kodi asks for it. Verified on
+hardware: the UI clock now reads 14:57 local.
+
+**Also fixed in the same pass, all visible in System info:**
+- `KODI::MEMORY::GetMemoryStatus` was a stub returning zeros, so the screen showed
+  `0MB / 0MB - 0%`. Now reports the process heap from `mallinfo()` plus libnx's
+  `fake_heap_start`/`fake_heap_end`: measured `191MB / 3084MB - 6%`.
+- Battery was the generic fallback's `return 0`. Now calls
+  `psmGetBatteryChargePercentage`, but the screen still shows 0% - psm has not been
+  confirmed to succeed from inside Kodi, so treat this as **unverified / still open**.
+  (The clock, memory and OS name in that same screenshot are correct.)
+- OS name was "Unknown OS" because neither `GetOsName()` nor `GetOsVersionInfo()` had
+  a Switch branch. Now "Atmosphère on Horizon" when `/atmosphere` exists.

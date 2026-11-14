@@ -19,11 +19,14 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <cstdio>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <switch.h>
 #include <unistd.h>
+
+extern "C" void switch_trace(const char* msg);
 
 namespace
 {
@@ -112,4 +115,24 @@ extern "C" int pause(void)
   for (;;)
     svcSleepThread(1000000000ull);
   return -1;
+}
+
+// Battery percentage for System info. psm is not initialised by Kodi, and its
+// absence must not be fatal: return 0 rather than pretending the console is empty.
+extern "C" int SwitchBatteryLevel()
+{
+  static bool psmReady = false;
+  static bool psmTried = false;
+  if (!psmTried)
+  {
+    psmTried = true;
+    psmReady = R_SUCCEEDED(psmInitialize());
+  }
+  if (!psmReady)
+    return 0;
+
+  u32 percent = 0;
+  if (R_FAILED(psmGetBatteryChargePercentage(&percent)))
+    return 0;
+  return static_cast<int>(percent);
 }
