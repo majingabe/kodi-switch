@@ -213,6 +213,30 @@ void CScreenShot::TakeScreenshot()
 
 void CScreenShot::TakeScreenshot(KODI::RENDERING::CAPTURE::CaptureContent content)
 {
+#if defined(TARGET_SWITCH)
+  // The other overload was already bypassed for Horizon, but the screenshot
+  // action comes through here, which still used CCaptureService. LinuxRendererGLES
+  // registers no capture provider, so Submit() never completed and the action
+  // silently wrote nothing. Resolve the folder and read the framebuffer directly,
+  // exactly like the filename overload does.
+  (void)content;
+  const std::string dir = ResolveScreenshotDir();
+  if (dir.empty())
+  {
+    CLog::Log(LOGWARNING, "No screenshot path configured");
+    return;
+  }
+  const std::string file =
+      CUtil::GetNextFilename(URIUtils::AddFileToFolder(dir, "screenshot{:05}.png"), 65535);
+  if (file.empty())
+  {
+    CLog::Log(LOGWARNING, "Too many screen shots or invalid folder");
+    return;
+  }
+  TakeScreenshotSwitch(file);
+  return;
+#endif
+
   using namespace KODI::RENDERING::CAPTURE;
 
   const auto captureService = CServiceBroker::GetCaptureService();

@@ -16,12 +16,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <csignal>
+#include <cerrno>
 #include <cxxabi.h>
 #include <exception>
+#include <vector>
 
 #include <dirent.h>
 #include <fcntl.h>
 #include <switch.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -292,6 +295,26 @@ extern "C" void switch_preinit()
       switch_trace(buf);
       g_socketReady = R_SUCCEEDED(fallback);
     }
+
+    // Measure the budget instead of guessing it. libnx does not expose the pool
+    // size, and shrinking the requested buffers has been observed to *reduce* the
+    // number of usable sockets, so the only reliable number comes from opening
+    // sockets until the service refuses.
+    if (g_socketReady)
+    {
+      std::vector<int> gauge;
+      int fd = 0;
+      while (gauge.size() < 64 && (fd = socket(AF_INET, SOCK_STREAM, 0)) >= 0)
+        gauge.push_back(fd);
+      const int lastErrno = errno;
+      for (int s : gauge)
+        close(s);
+      std::snprintf(buf, sizeof(buf), "socket gauge: %zu usable (stop errno=%d, cfg rx=%u tx=%u sb=%u sessions=%u)",
+                    gauge.size(), lastErrno, config.tcp_rx_buf_size, config.tcp_tx_buf_size,
+                    config.sb_efficiency, config.num_bsd_sessions);
+      switch_trace(buf);
+    }
+
   }
   g_nifmReady = R_SUCCEEDED(nifmInitialize(NifmServiceType_User));
 

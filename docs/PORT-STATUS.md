@@ -2139,3 +2139,40 @@ the handle leaked.
   server and is not. The HTTP UI is 8080 and is off.
 - RPC answers **slowly during playback** (well over 30 s at times) while the console
   decodes; timeouts under a minute look like a dead channel and are not.
+
+## 2026-11-14 - Screenshots, the accept-loop spin, and why the second playback fails
+
+**Screenshots were silently broken.** Kodi has two `CScreenShot::TakeScreenshot`
+overloads. Only `TakeScreenshot(filename, content)` was bypassed for Horizon; the
+one the *screenshot action* calls, `TakeScreenshot(content)`, still went through
+`CCaptureService`, and `LinuxRendererGLES` registers no capture provider, so
+`Submit()` never completed and nothing was written - with no error anywhere.
+Fixed by resolving the folder and calling the same `glReadPixels` path. Verified:
+1280x720 PNGs appear and transfer off the console through the probe.
+Also: with `debug.screenshotpath` unset the code opens a **folder dialog**, so a
+"screenshot" can just put a modal on screen; and `xbmcvfs.exists()` returns false
+for a directory that exists (use `os.makedirs`).
+
+**JSON-RPC accept loop spun and leaked.** `CTCPServer::Run` sleeps only when
+`accept()` fails with `EBADF`; libnx returns `ECONNABORTED` (113) when a pending
+connection dies, and it can return it continuously. Measured 83,570 "duplicate
+message" log lines in 10 s (~8,000 accept() calls/s) plus a leaked `CTCPClient`
+per failure, because the object is allocated before `accept()` and never freed.
+Now: the object is deleted, any failure backs off 100 ms, and logging is rate
+limited.
+
+**The second playback always fails, and it is not the network.** Measured with a
+fresh process:
+- playback 1: plays (`speed=1`, Fullscreen video)
+- playback 2 and 3: `OK dialog` within ~0.1 s
+- the media server log shows `206` for every attempt, so the data is being served
+- Kodi's own trace: `DVDInputStreamFile::Open OK` then `... FAILED`
+- free heap at that point is ~40 MB (`mem: alloc=435MB free=43MB arena=478MB`)
+- socket gauge: 9 usable at startup, 4 later (probe itself holds some)
+Earlier assumption that the pool is ~2 sockets is stale - it is 9 on this build.
+Next step: log the curl/AVIO error at `DVDInputStreamFile::Open` failure and
+sample free memory immediately before attempt 2; allocation failure inside the
+player is the leading hypothesis.
+
+**Also found:** `Addons33.db` reports `SQLITE_CORRUPT` on every start; the add-on
+repository queries fail as a result. Needs a rebuild of that database.
