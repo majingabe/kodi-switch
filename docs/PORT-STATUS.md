@@ -2074,3 +2074,16 @@ Root of the card:
 Already cleaned on the PC side:
   <user>\Videos was full of zips/py/xml from testing (they appeared in Kodi as
   "PC Videos"). All moved to C:\dev\kodi-switch\http\tmp-scripts.
+
+## 2026-11-13 - Exit is not slow: hbloader is
+
+User tested it: launched from an **NSP forwarder** (an installed application title, full
+memory via ApplicationOverride), Exit returns to the HOME menu immediately and cleanly.
+From hbmenu the same build takes ~30 s.
+
+So the 30 seconds was never Kodi's shutdown - it is hbloader tearing down the
+applet-hosted NRO afterwards. Our own shutdown already returns early and skips
+`Cleanup()`, which is why the image disappears long before the loader is done.
+
+Consequence: the "slow exit" work is closed with no code change. Launch from a forwarder.
+The README, ROADMAP and the store listing now say so.

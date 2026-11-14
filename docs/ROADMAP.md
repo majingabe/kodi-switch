@@ -5,13 +5,11 @@ hobby project and this list is a map, not a contract.
 
 ## Experiment queue (cheap, answers open questions)
 
-**Does launching from a forwarder make the exit fast?**
-Kodi launched from hbmenu runs under hbloader as an applet-hosted NRO; from an NSP
-forwarder it is a proper application title, which Horizon terminates differently. Kodi's
-own shutdown still skips `Cleanup()`, but the OS-side teardown may be the bulk of the
-~30 s. Measure: time Exit->HOME for both launch paths, then compare the gap between
-`Stop: enter` and the last line of `kodi.old.log`. If the forwarder is fast, the delay is
-on the loader side and there is nothing to fix here.
+**Does launching from a forwarder make the exit fast?** — **ANSWERED: yes.**
+Measured on hardware: launched from an NSP forwarder (a normal application title), exit is
+immediate and clean; from hbmenu it takes ~30 s. So the delay was hbloader tearing down the
+applet, not Kodi's shutdown, and there is nothing to fix in this code. Ship/launch from a
+forwarder.
 
 **Do stale "broken title" records clear on their own?**
 After repairing tickets, some titles still refuse to start for a while. Test whether a

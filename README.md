@@ -47,8 +47,9 @@ layer, and the real CPython interpreter — so normal Kodi add-ons and scrapers 
   visualisations, and other binary add-ons are therefore unavailable until each is
   ported the same way.
 - **No CD/DVD**, no optical drive support.
-- **Exit is slow** (~30 s) and lands on the HOME menu, because hbmenu's applet closes
-  when a full-memory application starts.
+- **Exit from hbmenu is slow** (~30 s): hbloader tears the applet down on the way out.
+  Launched from an **NSP forwarder** as a normal application, exit is immediate and clean -
+  measured on hardware. The delay is the loader, not Kodi.
 - **No hardware H.264 decode** — only HEVC goes through NVDEC. H.264 uses the proven
   software path to avoid regressing working playback.
 - **Clock shows UTC** in Kodi's own labels; Python and the OS see local time.
