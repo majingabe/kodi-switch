@@ -2176,3 +2176,54 @@ player is the leading hypothesis.
 
 **Also found:** `Addons33.db` reports `SQLITE_CORRUPT` on every start; the add-on
 repository queries fail as a result. Needs a rebuild of that database.
+
+## 2026-11-14 - Why "play, stop, play again" failed: a stale negative directory cache
+
+The user's report: play a stream, stop it, and the next one fails unless you wait
+about 30 seconds. Reproduced deterministically, then traced to a single line.
+
+**Symptom.** Playback 1 plays. Playback 2 fails in ~0.1 s with "Playback failed".
+The media server log shows `206` for every attempt, so the data was being served.
+
+**How it was found.** Instrumenting every early return in `CFile::Open` gave:
+
+```
+CFile::Open enter  flags=0x71  url=.../supercut.mp4
+CFile::Open dircache miss inCache=1
+DVDInputStreamFile::Open FAILED
+```
+
+`inCache=1` means `CDirectoryCache::FileExists()` returned false *and* reported that
+the path is in the cache - i.e. Kodi had cached "this file does not exist". The
+next line, `if (bPathInCache) return false;`, then refuses the open **without any
+network access at all**. When the entry expires, the same file plays again: that
+is the ~30 seconds.
+
+Why the entry exists: while the console is streaming, a directory listing can fail
+(the media server is occupied), and Kodi stores that failure as "not there".
+
+**Fix (`overlay/xbmc/filesystem/File.cpp`).** For internet streams, do not honour a
+negative directory-cache entry; let the server answer. Verified on hardware:
+5/5 consecutive playbacks with no waits, mixing a 7 GB file and a 10 s clip.
+
+**Ruled out along the way** (all measured, none of them the cause):
+- socket exhaustion: a startup gauge reports 9 usable sockets, not the 2 the old
+  note assumed; the gauge also recovers after a stop
+- memory: the failing open had *more* free heap than the successful one
+  (`free=258950KB` vs `13710KB`)
+- the file cache: `CFileCache::Open` was never reached - no `filecache:` trace fired
+- codec/size: the same 7 GB file played fine on the first attempt
+- the probe add-on: disabling it changed nothing
+
+**Tried and reverted:** `SO_LINGER {1,0}` on curl sockets (to release an aborted
+stream immediately). It did not fix the open, and it left Kodi stuck on the busy
+dialog (window 10138) after every `Player.Stop`. Reverted.
+
+**Still open:** stopping playback of a *large* HTTP stream leaves the busy dialog up
+permanently (5 MB clip: clean; 7 GB file: stuck). The file-cache reader thread is
+probably blocked in a socket read while `StopThread()` waits for it, but that is not
+yet proven. Pre-existing or introduced by the `Join()` polling change is unknown -
+the v22.0rc1 baseline is being tested by hand to decide.
+
+**Also open:** `Addons33.db` reports `SQLITE_CORRUPT` on every start, so add-on
+repository queries fail. Needs the database rebuilt.

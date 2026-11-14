@@ -15,6 +15,9 @@
 #include "video/VideoFileItemClassify.h"
 
 #include <cstdio>
+#if defined(TARGET_SWITCH)
+#include <malloc.h>
+#endif
 
 extern "C" void switch_trace(const char* msg);
 
@@ -72,6 +75,15 @@ bool CDVDInputStreamFile::Open()
     flags |= READ_MULTI_STREAM;
 
   // open file in binary mode
+#if defined(TARGET_SWITCH)
+  {
+    struct mallinfo mi = mallinfo();
+    char mbuf[160];
+    std::snprintf(mbuf, sizeof(mbuf), "open attempt: free=%dKB arena=%dKB uordblks=%dKB",
+                  mi.fordblks / 1024, mi.arena / 1024, mi.uordblks / 1024);
+    switch_trace(mbuf);
+  }
+#endif
   if (!m_pFile->Open(m_item.GetDynPath(), flags))
   {
     switch_trace("DVDInputStreamFile::Open FAILED");

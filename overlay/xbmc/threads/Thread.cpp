@@ -96,33 +96,57 @@ void LogBuildOnce()
 std::mutex g_orphanMutex;
 std::vector<std::thread*> g_orphanThreads;
 
-void ReapOrphanThreads()
+// Joining must NOT happen on the thread calling Create(). Doing it inline
+// deadlocked on hardware: an auto-delete worker was waiting on the GUI thread
+// while the GUI thread sat inside Create() joining that same worker, which froze
+// the UI in Kodi's busy dialog (window 10138) with JSON-RPC still answering.
+// A dedicated thread does the blocking join instead.
+void ReaperLoop()
 {
-  std::vector<std::thread*> orphans;
+  for (;;)
   {
-    std::lock_guard<std::mutex> lock(g_orphanMutex);
-    orphans.swap(g_orphanThreads);
-  }
+    std::vector<std::thread*> orphans;
+    {
+      std::lock_guard<std::mutex> lock(g_orphanMutex);
+      orphans.swap(g_orphanThreads);
+    }
 
-  for (std::thread* thread : orphans)
-  {
-    try
+    for (std::thread* thread : orphans)
     {
-      if (thread->joinable())
-        thread->join(); // the owner has finished; this only reaps the handle
+      try
+      {
+        if (thread->joinable())
+          thread->join(); // the owner has finished; this only reaps the handle
+      }
+      catch (const std::exception& e)
+      {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "CThread orphan reaper: join failed: %s", e.what());
+        switch_trace(buf);
+      }
+      catch (...)
+      {
+        switch_trace("CThread orphan reaper: join failed (unknown)");
+      }
+      delete thread;
     }
-    catch (const std::exception& e)
-    {
-      char buf[160];
-      std::snprintf(buf, sizeof(buf), "CThread orphan reaper: join failed: %s", e.what());
-      switch_trace(buf);
-    }
-    catch (...)
-    {
-      switch_trace("CThread orphan reaper: join failed (unknown)");
-    }
-    delete thread;
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
+}
+
+void ParkThread(std::thread* thread)
+{
+  static std::once_flag once;
+  std::call_once(once, []() {
+    // Deliberately never joined or detached: one reaper thread for the process
+    // lifetime. pthread_detach is a stub here, so it must simply live on.
+    auto* reaper = new std::thread(ReaperLoop);
+    (void)reaper;
+  });
+
+  std::lock_guard<std::mutex> lock(g_orphanMutex);
+  g_orphanThreads.push_back(thread);
 }
 } // namespace
 #endif
@@ -174,12 +198,9 @@ CThread::~CThread()
 #if defined(TARGET_SWITCH)
       // Still set after StopThread() means this destructor is running on the
       // thread itself (auto-delete worker), so it cannot be joined here.
-      // pthread_detach is a stub returning ENOSYS, so park the object for the
-      // reaper rather than throwing out of a noexcept destructor.
-      {
-        std::lock_guard<std::mutex> lock(g_orphanMutex);
-        g_orphanThreads.push_back(m_thread);
-      }
+      // pthread_detach is a stub returning ENOSYS, so hand the object to the
+      // reaper thread rather than throwing out of a noexcept destructor.
+      ParkThread(m_thread);
 #else
       m_thread->detach();
       delete m_thread;
@@ -202,8 +223,7 @@ CThread::~CThread()
     if (m_thread != nullptr)
     {
       // Park it too - detach() is what threw in the first place.
-      std::lock_guard<std::mutex> lock(g_orphanMutex);
-      g_orphanThreads.push_back(m_thread);
+      ParkThread(m_thread);
       m_thread = nullptr;
     }
   }
@@ -215,8 +235,7 @@ CThread::~CThread()
     switch_trace(ubuf);
     if (m_thread != nullptr)
     {
-      std::lock_guard<std::mutex> lock(g_orphanMutex);
-      g_orphanThreads.push_back(m_thread);
+      ParkThread(m_thread);
     }
     m_thread = nullptr;
   }
@@ -227,12 +246,6 @@ CThread::~CThread()
 
 void CThread::Create(bool bAutoDelete)
 {
-#if defined(TARGET_SWITCH)
-  // Auto-delete workers park their std::thread in ~CThread (see the note there);
-  // join and free any that have finished. This runs on a different thread, which
-  // is exactly what makes joining them legal.
-  ReapOrphanThreads();
-#endif
   if (m_thread != nullptr)
   {
     // if the thread exited on it's own, without a call to StopThread, then we can get here

@@ -31,6 +31,9 @@
 #ifdef TARGET_POSIX
 #include <errno.h>
 #include <inttypes.h>
+#if defined(TARGET_SWITCH)
+#include <sys/socket.h>
+#endif
 #include "platform/posix/ConvUtils.h"
 #endif
 
@@ -537,6 +540,10 @@ int SwitchCurlSockopt(void* /*clientp*/, curl_socket_t fd, curlsocktype /*purpos
   // the bsd pool than 256 KB did (see the socket gauge note in PlatformSwitch.cpp).
   int buf = 64 * 1024;
   setsockopt(fd, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&buf), sizeof(buf));
+
+  // NOTE: an abortive close (SO_LINGER {1,0}) was tried here to release the socket
+  // immediately after stopping a stream. Reverted: it is the prime suspect for the
+  // busy dialog that then never cleared after Player.Stop.
 
   static bool traced = false;
   if (!traced)
@@ -1184,6 +1191,14 @@ bool CCurlFile::Open(const CURL& url)
   m_opened = true;
   m_seekable = true;
 
+#if defined(TARGET_SWITCH)
+  {
+    char tbuf[384];
+    std::snprintf(tbuf, sizeof(tbuf), "curl open enter: %s", url.Get().c_str());
+    switch_trace(tbuf);
+  }
+#endif
+
   CURL url2(url);
   ParseAndCorrectUrl(url2);
 
@@ -1225,6 +1240,18 @@ bool CCurlFile::Open(const CURL& url)
 
     CLog::Log(LOGERROR, "CCurlFile::{} - <{}> Failed with code {}:\n{}", __FUNCTION__,
               redactPath, m_httpresponse, error);
+
+#if defined(TARGET_SWITCH)
+    // kodi.log is locked while the app runs, so the one fact needed to diagnose a
+    // failed open (was it the server, the connection, or the socket pool?) goes to
+    // the trace file as well.
+    {
+      char tbuf[384];
+      std::snprintf(tbuf, sizeof(tbuf), "curl open failed: http=%ld errno=%d url=%s",
+                    m_httpresponse, errno, redactPath.c_str());
+      switch_trace(tbuf);
+    }
+#endif
 
     return false;
   }
@@ -1288,6 +1315,10 @@ bool CCurlFile::Open(const CURL& url)
     }
     m_url = efurl;
   }
+
+#if defined(TARGET_SWITCH)
+  switch_trace("curl open ok");
+#endif
 
   return true;
 }
