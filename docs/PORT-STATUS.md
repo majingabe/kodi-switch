@@ -2350,3 +2350,18 @@ Verified the flag is sent during playback; the dimming behaviour itself is being
 confirmed by hand.
 
 Not covered: audio-only playback still lets the console dim.
+
+### Correction (same day): it was auto-sleep, not media state
+
+`appletSetMediaPlaybackState(true)` alone did not stop the dimming - confirmed by hand.
+Horizon's dim is the auto-sleep timer's warning stage, and the call that governs it is
+`appletSetAutoSleepDisabled(true)`. Both are now set on playback start and cleared on
+stop/pause, and both return `rc=0x0` on hardware:
+
+```
+media playback state: on (media rc=0x0, autosleep rc=0x0)
+```
+
+With auto-sleep disabled the panel now holds brightness for a whole film with the
+controller asleep - confirmed by hand. Kodi's own screensaver was ruled out first:
+`screensaver.mode` is empty, so nothing in Kodi was dimming.

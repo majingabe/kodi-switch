@@ -1598,6 +1598,7 @@ void SwitchPlaybackGuard(CApplicationPlayer* appPlayer)
     if (mediaPlaying)
     {
       appletSetMediaPlaybackState(false);
+      appletSetAutoSleepDisabled(false);
       mediaPlaying = false;
       switch_trace("media playback state: off");
     }
@@ -1613,9 +1614,13 @@ void SwitchPlaybackGuard(CApplicationPlayer* appPlayer)
 #if defined(TARGET_SWITCH)
   if (!mediaPlaying)
   {
-    appletSetMediaPlaybackState(true);
+    const Result mediaRc = appletSetMediaPlaybackState(true);
+    const Result sleepRc = appletSetAutoSleepDisabled(true);
     mediaPlaying = true;
-    switch_trace("media playback state: on");
+    char mbuf[160];
+    std::snprintf(mbuf, sizeof(mbuf), "media playback state: on (media rc=0x%x, autosleep rc=0x%x)",
+                  mediaRc, sleepRc);
+    switch_trace(mbuf);
   }
 #endif
 
