@@ -2365,3 +2365,10 @@ media playback state: on (media rc=0x0, autosleep rc=0x0)
 With auto-sleep disabled the panel now holds brightness for a whole film with the
 controller asleep - confirmed by hand. Kodi's own screensaver was ruled out first:
 `screensaver.mode` is empty, so nothing in Kodi was dimming.
+
+## 2026-11-14 - Bluetooth audio verified
+
+Hand-tested: playback over Bluetooth is clean, with no sync or stability problem
+reported ("perfect"). The audio path is `CAESinkSwitch` -> `audout`, which Horizon
+mixes, so Bluetooth is transparent to Kodi - no port-side latency compensation is
+needed. Speakers, wired headphones and Bluetooth are now all confirmed on hardware.
