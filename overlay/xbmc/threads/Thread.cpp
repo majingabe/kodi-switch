@@ -21,6 +21,7 @@
 #include <iostream>
 #include <mutex>
 #include <stdlib.h>
+#include <vector>
 
 #if defined(TARGET_SWITCH)
 // Horizon's threadCreate fails (typically out of memory for a new stack) long
@@ -62,6 +63,70 @@ struct fmt::formatter<std::thread::id> : fmt::formatter<std::string>
 
 static thread_local CThread* currentThread;
 
+#if defined(TARGET_SWITCH)
+namespace
+{
+// One line per boot, so every trace in boot.log can be attributed to a build.
+// boot.log is append-only and spans hundreds of launches; without this marker a
+// measurement cannot be tied to the binary that produced it.
+void LogBuildOnce()
+{
+  static std::atomic<bool> logged{false};
+  if (logged.exchange(true))
+    return;
+
+  char buf[128];
+  std::snprintf(buf, sizeof(buf), "kodi-switch build: threads " __DATE__ " " __TIME__);
+  switch_trace(buf);
+}
+
+// pthread_detach() is a stub on this toolchain: it returns ENOSYS (88) and does
+// nothing. std::thread::detach() therefore always throws std::system_error, and
+// from an implicitly noexcept destructor that is std::terminate.
+//
+// The one place Kodi genuinely needs to detach is an auto-delete thread: a
+// CJobWorker is created with Create(true), so when its job finishes the worker
+// runs ~CThread on its own thread. StopThread() cannot join itself and leaves
+// m_thread set, and the destructor then detaches - which threw, leaked the
+// handle and (before the try/catch) killed the process mid-playback.
+//
+// pthread_join(), unlike detach, is implemented (it calls __syscall_thread_join)
+// and reclaims the thread handle. So a self-deleting thread parks its
+// std::thread here and the next Create() on another thread joins and frees it.
+std::mutex g_orphanMutex;
+std::vector<std::thread*> g_orphanThreads;
+
+void ReapOrphanThreads()
+{
+  std::vector<std::thread*> orphans;
+  {
+    std::lock_guard<std::mutex> lock(g_orphanMutex);
+    orphans.swap(g_orphanThreads);
+  }
+
+  for (std::thread* thread : orphans)
+  {
+    try
+    {
+      if (thread->joinable())
+        thread->join(); // the owner has finished; this only reaps the handle
+    }
+    catch (const std::exception& e)
+    {
+      char buf[160];
+      std::snprintf(buf, sizeof(buf), "CThread orphan reaper: join failed: %s", e.what());
+      switch_trace(buf);
+    }
+    catch (...)
+    {
+      switch_trace("CThread orphan reaper: join failed (unknown)");
+    }
+    delete thread;
+  }
+}
+} // namespace
+#endif
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -72,6 +137,9 @@ CThread::CThread(const char* ThreadName)
 {
   if (ThreadName)
     m_ThreadName = ThreadName;
+#if defined(TARGET_SWITCH)
+  LogBuildOnce();
+#endif
 }
 
 CThread::CThread(IRunnable* pRunnable, const char* ThreadName)
@@ -80,29 +148,42 @@ CThread::CThread(IRunnable* pRunnable, const char* ThreadName)
 {
   if (ThreadName)
     m_ThreadName = ThreadName;
+#if defined(TARGET_SWITCH)
+  LogBuildOnce();
+#endif
 }
 
 CThread::~CThread()
 {
-  // On Switch an exception escapes this implicitly-noexcept destructor and the
-  // runtime turns it into std::unexpected -> std::terminate. Measured crash
-  // report (2168-0002, 1080p HEVC playback at 1.00x, ~97 s in):
+  // On Switch an exception escaping this implicitly-noexcept destructor becomes
+  // std::unexpected -> std::terminate. Measured crash report (2168-0002, 1080p
+  // HEVC playback at 1.00x, ~97 s in):
   //   CJobWorker::~CJobWorker -> CThread::~CThread+0x74c -> std::unexpected
   //                                                 -> __terminate
-  // The throw is inside StopThread() (CEvent::Wait / Join), not in detach(), so
-  // the whole body is covered and the actual message is written to boot.log.
+  // Root cause, read out of the linked binary: pthread_detach() on this
+  // toolchain is a stub that returns ENOSYS without doing anything, so
+  // std::thread::detach() always throws. An auto-delete CJobWorker destroys
+  // itself from its own thread, where joining is impossible, so the destructor
+  // reached detach() every time a job finished. The whole body stays covered
+  // and the message is written to boot.log.
   auto destroy = [this]()
   {
     StopThread();
     if (m_thread != nullptr)
     {
 #if defined(TARGET_SWITCH)
-      if (m_thread->joinable())
-        m_thread->detach();
+      // Still set after StopThread() means this destructor is running on the
+      // thread itself (auto-delete worker), so it cannot be joined here.
+      // pthread_detach is a stub returning ENOSYS, so park the object for the
+      // reaper rather than throwing out of a noexcept destructor.
+      {
+        std::lock_guard<std::mutex> lock(g_orphanMutex);
+        g_orphanThreads.push_back(m_thread);
+      }
 #else
       m_thread->detach();
-#endif
       delete m_thread;
+#endif
       m_thread = nullptr;
     }
   };
@@ -115,26 +196,28 @@ CThread::~CThread()
   catch (const std::exception& e)
   {
     char buf[192];
-    std::snprintf(buf, sizeof(buf), "CThread dtor escaped: %s", e.what());
+    std::snprintf(buf, sizeof(buf), "CThread dtor escaped [%s]: %s", m_ThreadName.c_str(),
+                  e.what());
     switch_trace(buf);
     if (m_thread != nullptr)
     {
-      try
-      {
-        if (m_thread->joinable())
-          m_thread->detach();
-        delete m_thread;
-      }
-      catch (...)
-      {
-        switch_trace("CThread dtor: cleanup after throw failed (leaking handle)");
-      }
+      // Park it too - detach() is what threw in the first place.
+      std::lock_guard<std::mutex> lock(g_orphanMutex);
+      g_orphanThreads.push_back(m_thread);
       m_thread = nullptr;
     }
   }
   catch (...)
   {
-    switch_trace("CThread dtor escaped: unknown exception");
+    char ubuf[192];
+    std::snprintf(ubuf, sizeof(ubuf), "CThread dtor escaped [%s]: unknown exception",
+                  m_ThreadName.c_str());
+    switch_trace(ubuf);
+    if (m_thread != nullptr)
+    {
+      std::lock_guard<std::mutex> lock(g_orphanMutex);
+      g_orphanThreads.push_back(m_thread);
+    }
     m_thread = nullptr;
   }
 #else
@@ -144,14 +227,25 @@ CThread::~CThread()
 
 void CThread::Create(bool bAutoDelete)
 {
+#if defined(TARGET_SWITCH)
+  // Auto-delete workers park their std::thread in ~CThread (see the note there);
+  // join and free any that have finished. This runs on a different thread, which
+  // is exactly what makes joining them legal.
+  ReapOrphanThreads();
+#endif
   if (m_thread != nullptr)
   {
     // if the thread exited on it's own, without a call to StopThread, then we can get here
     // incorrectly. We should be able to determine this by checking the promise.
+#if defined(TARGET_SWITCH)
+    const bool exited = m_finished.load();
+#else
     std::future_status stat = m_future.wait_for(std::chrono::milliseconds(0));
     // a status of 'ready' means the future contains the value so the thread has exited
     // since the thread can't exit without setting the future.
-    if (stat == std::future_status::ready) // this is an indication the thread has exited.
+    const bool exited = (stat == std::future_status::ready);
+#endif
+    if (exited) // this is an indication the thread has exited.
       StopThread(true);  // so let's just clean up
     else
     { // otherwise we have a problem.
@@ -172,6 +266,10 @@ void CThread::Create(bool bAutoDelete)
 
   std::promise<bool> prom;
   m_future = prom.get_future();
+
+#if defined(TARGET_SWITCH)
+  m_finished.store(false);
+#endif
 
   {
     // The std::thread internals must be set prior to the lambda doing
@@ -219,6 +317,12 @@ void CThread::Create(bool bAutoDelete)
 
         pThread->Action();
 
+#if defined(TARGET_SWITCH)
+        // Mark completion before the auto-delete below, so IsRunning()/Join() see the
+        // thread as finished even while this object is being destroyed.
+        pThread->m_finished.store(true);
+#endif
+
         if (pThread->m_bAutoDelete)
         {
           CLog::Log(LOGDEBUG, "Thread {} {} terminating (autodelete)", pThread->m_ThreadName,
@@ -233,10 +337,20 @@ void CThread::Create(bool bAutoDelete)
       catch (const std::exception& e)
       {
         CLog::Log(LOGDEBUG, "Thread Terminating with Exception: {}", e.what());
+#if defined(TARGET_SWITCH)
+        // The flag must be set however this lambda leaves, or Join()/IsRunning()
+        // would never see the thread finish and StopThread() would wait forever.
+        if (pThread != NULL)
+          pThread->m_finished.store(true);
+#endif
       }
       catch (...)
       {
         CLog::Log(LOGDEBUG,"Thread Terminating with Exception");
+#if defined(TARGET_SWITCH)
+        if (pThread != NULL)
+          pThread->m_finished.store(true);
+#endif
       }
 
       promise.set_value(true);
@@ -268,6 +382,10 @@ void CThread::Create(bool bAutoDelete)
 bool CThread::IsRunning() const
 {
   if (m_thread != nullptr) {
+#if defined(TARGET_SWITCH)
+    // See the m_finished note in Thread.h: wait_for() throws ENOSYS here.
+    return !m_finished.load();
+#else
     // it's possible that the thread exited on it's own without a call to StopThread. If so then
     // the promise should be fulfilled.
     std::future_status stat = m_future.wait_for(std::chrono::milliseconds(0));
@@ -276,6 +394,7 @@ bool CThread::IsRunning() const
     if (stat == std::future_status::ready) // this is an indication the thread has exited.
       return false;
     return true; // otherwise the thread is still active.
+#endif
   } else
     return false;
 }
@@ -348,9 +467,26 @@ bool CThread::Join(std::chrono::milliseconds duration)
 
     {
       CSingleExit exit(m_CriticalSection); // don't hold the thread lock while we're waiting
+#if defined(TARGET_SWITCH)
+      // pthread_cond_timedwait is unimplemented on Horizon (ENOSYS), and the future's
+      // wait_for() goes through it, throwing std::system_error out of this noexcept
+      // caller. Poll the completion flag instead, honouring the deadline.
+      using clock = std::chrono::steady_clock;
+      const bool infinite = duration == std::chrono::milliseconds::max();
+      const auto deadline = clock::now() + duration;
+      while (!m_finished.load())
+      {
+        if (IsCurrentThread())
+          return false;
+        if (!infinite && clock::now() >= deadline)
+          return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+#else
       std::future_status stat = m_future.wait_for(duration);
       if (stat != std::future_status::ready)
         return false;
+#endif
     }
 
     // it's possible it's already joined since we released the lock above.

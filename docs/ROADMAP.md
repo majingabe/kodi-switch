@@ -25,11 +25,13 @@ starts (socket, ssl, nifm, hid) are never released. Calling the cleanup explicit
 `XBMC_Run()` returns — instead of relying on `atexit`, which does not appear to run — is
 the cheap experiment.
 
-**Close the `ENOSYS` teardown leak.**
-A thread-destructor path still throws `ENOSYS` from the event/condition-variable wait
-about twice per 10 minutes of playback. It is caught and logged now, but each event
-leaks a thread handle. Replace the `std::future::wait_for()` in `CThread::Join()` with a
-direct join (or a poll loop) on this platform.
+**Close the `ENOSYS` teardown leak.** — **DONE (2026-11-13).**
+Root cause was not the future wait: `pthread_detach()` is a stub returning `ENOSYS`,
+and auto-delete `CJobWorker`s destroy themselves from their own thread, where joining is
+impossible, so `~CThread` reached `detach()` on every finished job. `Join()` now polls a
+completion flag, and the destructor parks self-destroying threads for the next `Create()`
+to `join()` + `delete` (which reclaims the handle). Verified with zero escapes across a
+long playback.
 
 **Hardware H.264 decode.**
 NVDEC currently only takes HEVC, deliberately, so a hardware bug cannot regress the

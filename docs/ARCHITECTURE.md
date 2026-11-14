@@ -124,8 +124,15 @@ supporting fixes: `Create()` catches thread-creation failure (libnx reports it a
 to keep a worker whose thread never started — otherwise it counts a phantom worker as
 free forever and stops handing out jobs.
 
-Known remaining wart: the same call can still throw `ENOSYS` occasionally (roughly twice
-per 10 minutes of playback). It is caught and logged; one thread handle leaks each time.
+**Resolved (2026-11-13):** the throw was never the condition-variable wait. Read out of
+the linked binary, `pthread_detach()` on this toolchain is a stub returning `ENOSYS` (88)
+without doing anything, while `pthread_join()` is real (it calls `__syscall_thread_join`)
+and `pthread_cond_timedwait()` is implemented. Auto-delete workers (`CJobWorker` uses
+`Create(true)`) run `~CThread` on their own thread, cannot join themselves, and therefore
+reached `detach()` — which threw every time a job finished. The destructor no longer
+detaches on Switch: it parks the `std::thread*` and the next `Create()` on another thread
+joins and deletes it, which also reclaims the handle. Measured: zero escapes across a
+playback that previously produced one within a minute.
 
 ## Files, audio, screenshots
 

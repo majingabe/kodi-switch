@@ -2087,3 +2087,55 @@ applet-hosted NRO afterwards. Our own shutdown already returns early and skips
 
 Consequence: the "slow exit" work is closed with no code change. Launch from a forwarder.
 The README, ROADMAP and the store listing now say so.
+
+## 2026-11-13 - The ENOSYS teardown leak: pthread_detach is a stub
+
+Closed. The cause was not the condition-variable wait, and not `std::future` either.
+
+**How it was found.** Instrumenting `~CThread` to print the thread name turned
+"escaped: Function not implemented" into:
+
+```
+CThread dtor escaped [JobWorker]: Function not implemented
+CThread dtor: cleanup after throw failed [JobWorker] (leaking handle)
+```
+
+Then reading the linked binary (`aarch64-none-elf-objdump` on `kodi.bin`) settled
+it without guessing:
+
+```
+pthread_join:    bl __syscall_thread_join      <- real, implemented
+pthread_detach:  mov w0, #0x58 ; ret           <- 88 = ENOSYS, does nothing
+pthread_cond_timedwait:                        <- real (calls __libc_cond_wait)
+```
+
+So `std::thread::detach()` throws `std::system_error` on **every** call, while
+`join()` works. `CJobWorker` is created with `Create(true)` ("kill ourselves when
+we're done"), so when a job finishes the worker runs `~CThread` on its own thread.
+`StopThread()` cannot join itself and leaves `m_thread` set, and the destructor then
+called `detach()` - which threw out of an implicitly `noexcept` destructor. The
+second trace is that same throw happening again in the cleanup path, which is why
+the handle leaked.
+
+**Fix (overlay `xbmc/threads/Thread.cpp`).**
+- `Join()` polls an atomic completion flag instead of `std::future::wait_for()`.
+- The destructor never calls `detach()` on Switch. When `m_thread` is still set
+  after `StopThread()` - i.e. this is an auto-delete thread destroying itself - the
+  `std::thread*` is parked in a small list. The next `CThread::Create()` on another
+  thread `join()`s and deletes it, and `join()` is what reclaims the handle.
+- Both destructor traces now include the thread name.
+- Every boot writes one `kodi-switch build: threads <date> <time>` line, because
+  `boot.log` is append-only across hundreds of launches and a measurement has to be
+  attributable to a binary.
+
+**Measured.** Same 7h file over HTTP, same machine:
+- before: 1 escape by `playsec=65`, every session; 27 escapes over 222 boots total
+- after: **0 escapes across `playsec=1120`** (18.7 min), `alloc` flat 457 -> 449 MB
+
+**Also learned, and worth not re-learning:**
+- Port **9090 is Kodi's raw JSON-RPC TCP socket**, not HTTP: request = 4-byte
+  big-endian length + JSON, response = bare JSON with no prefix. Sending HTTP to it
+  yields `HTTP/1.1 400 Bad Request` with no headers, which looks like a broken web
+  server and is not. The HTTP UI is 8080 and is off.
+- RPC answers **slowly during playback** (well over 30 s at times) while the console
+  decodes; timeouts under a minute look like a dead channel and are not.
