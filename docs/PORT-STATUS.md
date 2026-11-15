@@ -2469,3 +2469,37 @@ Also learned: `Settings.SetSettingValue` does not accept add-on settings in this
 version (returns Invalid params), so add-on settings have to be written as
 `addon_data/<addonid>/settings.xml`; and the add-on type enum is `kodi.pvrclient`, not
 `xbmc.pvrclient`.
+
+### pvr.iptvsimple: what is ruled out (measured, not inferred)
+
+The client loads and `PVR_ADDON_Create returned 0`, but `Start()` never returns, so the
+PVR manager sits at "PVR manager is starting up" and `PVR.GetChannels` answers
+`-32100 Failed to execute method`.
+
+From the source, `CIptvSimple::Start()` calls `m_playlistLoader.LoadPlayList()`
+**synchronously** before it logs "Starting separate client update thread..." - and that
+line never appears in kodi.log, which pins the stall inside `LoadPlayList()`.
+
+Ruled out, each with evidence:
+
+- **settings**: `addon_data/pvr.iptvsimple/settings.xml` on the card still holds
+  `m3uPathType=1` and `m3uUrl=http://192.168.1.234:8003/test.m3u`
+- **the server**: listening, `GET /test.m3u` -> 200, 295 bytes
+- **our curl/VFS path**: `xbmcvfs.File(<same url>).read()` from the probe returns 295
+  bytes in 0.0 s, so the exact path the add-on uses works
+- **databases**: `PRAGMA integrity_check` = ok for TV48, Addons33, MyVideos149,
+  Textures14 and Epg22 (the earlier corrupt Addons33 was rebuilt)
+- **retry behaviour**: not the cause - the probe fetch is instant
+
+Also observed: at 08:31 the console could not reach `mirrors.kodi.tv`
+(`CCurlFile ... Could not connect to server`), while the LAN server answered. Internet
+reachability on this console deserves its own check.
+
+Leading hypothesis, not yet proven: PVR starts ~14 s into boot and the synchronous fetch
+runs before WiFi association completes, so the connect blocks. Kodi does not log network
+state at info level, so the next step is instrumentation - trace nifm/interface state at
+preinit and around the first CFile::Open of an http:// URL - rather than more guessing.
+
+Note for the next session: do NOT toggle the add-on with SetAddonEnabled while the PVR
+manager is starting; that aborts the start and produced a false "could not validate M3U"
+earlier.
