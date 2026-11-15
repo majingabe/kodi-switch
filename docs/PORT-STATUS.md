@@ -2407,3 +2407,25 @@ pool and take JSON-RPC down for the duration (connections refused while the GUI 
 responsive). It recovers, but it is the same pool limit that bit playback earlier -
 installing several add-ons back to back will do it. Worth remembering before assuming
 "remote control broke".
+
+## 2026-11-14 - Official repository add-ons install and run (skins included)
+
+With the add-ons database repaired, the normal install path works end to end:
+
+- `skin.confluence` installed from the Kodi Add-on repository through the UI and was
+  activated; Kodi rebuilt the texture cache and ran it (confirmed by hand)
+- `resource.images.studios.white` installed earlier by id and is present
+- the add-on manager reports 14 skins and 19 UI sound packs available from repos
+
+So, installable and working today: **skins, UI sounds, resource images, and Python
+scripts/services** - everything in the official repo that is not a compiled add-on.
+
+Still out of reach: **binary add-ons** (PVR clients, visualisations, audio encoders,
+screensavers with code). They cannot be `dlopen`ed on this platform; the working pattern
+is to build them as static libraries and link them into the executable, as
+`inputstream.adaptive` already is. That is the next meaningful step for repository
+coverage.
+
+Caveat measured along the way: a 7 MB skin download exhausts the BSD socket pool and
+takes JSON-RPC down until it finishes (the GUI stays responsive). Installing several
+add-ons in a row will hit the same limit.
