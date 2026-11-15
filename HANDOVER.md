@@ -3,6 +3,11 @@
 Written 2026-11-14 at the end of a long session. Read this first; then
 `docs/PORT-STATUS.md` for the detailed history, newest entries at the bottom.
 
+> **Before changing anything on the console, work through `CHECKLIST.md`.**
+> It is mandatory, and every item in it exists because skipping it already cost us
+> a session — including the `Addons33.db` rebuild that silently disabled 106 of 117
+> add-ons and was reported as "it broke my add-on".
+
 ## What is deployed on the console right now
 
 A local build (not a release) containing everything below. It is newer than
