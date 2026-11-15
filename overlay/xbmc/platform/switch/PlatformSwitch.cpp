@@ -419,10 +419,17 @@ extern "C" int ADDON_Create(void* addonInterface);
 extern "C" const char* ADDON_GetTypeVersion(int type);
 extern "C" const char* ADDON_GetTypeMinVersion(int type);
 
+// pvr.iptvsimple is built with prefixed entry points (see the build script) so both
+// static add-ons can live in one binary without colliding on ADDON_Create.
+extern "C" int PVR_ADDON_Create(void* addonInterface);
+extern "C" const char* PVR_ADDON_GetTypeVersion(int type);
+extern "C" const char* PVR_ADDON_GetTypeMinVersion(int type);
+
 namespace
 {
 char g_dlLastError[256];
 int g_staticAddonHandle;
+int g_pvrAddonHandle;
 
 // inputstream.adaptive can throw while opening a manifest/segment, and an
 // exception escaping through ADDON_Create reaches Kodi's C boundary where it
@@ -465,6 +472,46 @@ void* LookupStaticAddonSymbol(const char* name)
 
   return nullptr;
 }
+
+// pvr.iptvsimple entry points, with the same exception guard as ISA: a throw across
+// the C boundary terminates the process.
+int SwitchPvrAddonCreate(void* addonInterface)
+{
+  try
+  {
+    const int status = PVR_ADDON_Create(addonInterface);
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "PVR_ADDON_Create returned %d", status);
+    switch_trace(buf);
+    return status;
+  }
+  catch (const std::exception& ex)
+  {
+    char buf[400];
+    std::snprintf(buf, sizeof(buf), "PVR_ADDON_Create threw: %s", ex.what());
+    switch_trace(buf);
+  }
+  catch (...)
+  {
+    switch_trace("PVR_ADDON_Create threw a non-standard exception");
+  }
+  return 5; // ADDON_STATUS_PERMANENT_FAILURE
+}
+
+void* LookupPvrAddonSymbol(const char* name)
+{
+  if (name == nullptr)
+    return nullptr;
+
+  if (std::strcmp(name, "ADDON_Create") == 0)
+    return reinterpret_cast<void*>(&SwitchPvrAddonCreate);
+  if (std::strcmp(name, "ADDON_GetTypeVersion") == 0)
+    return reinterpret_cast<void*>(&PVR_ADDON_GetTypeVersion);
+  if (std::strcmp(name, "ADDON_GetTypeMinVersion") == 0)
+    return reinterpret_cast<void*>(&PVR_ADDON_GetTypeMinVersion);
+
+  return nullptr;
+}
 } // namespace
 
 extern "C" void* switch_dlopen(const char* file, int mode)
@@ -473,6 +520,8 @@ extern "C" void* switch_dlopen(const char* file, int mode)
 
   if (file != nullptr && std::strstr(file, "inputstream.adaptive") != nullptr)
     return &g_staticAddonHandle;
+  if (file != nullptr && std::strstr(file, "pvr.iptvsimple") != nullptr)
+    return &g_pvrAddonHandle;
 
   std::snprintf(g_dlLastError, sizeof(g_dlLastError),
                 "no dynamic linker on Horizon OS: %s", file ? file : "(null)");
@@ -481,13 +530,17 @@ extern "C" void* switch_dlopen(const char* file, int mode)
 
 extern "C" void* switch_dlsym(void* handle, const char* name)
 {
-  if (handle != &g_staticAddonHandle)
+  void* symbol = nullptr;
+  if (handle == &g_staticAddonHandle)
+    symbol = LookupStaticAddonSymbol(name);
+  else if (handle == &g_pvrAddonHandle)
+    symbol = LookupPvrAddonSymbol(name);
+  else
   {
     std::snprintf(g_dlLastError, sizeof(g_dlLastError), "invalid library handle");
     return nullptr;
   }
 
-  void* symbol = LookupStaticAddonSymbol(name);
   if (symbol == nullptr)
     std::snprintf(g_dlLastError, sizeof(g_dlLastError), "symbol not found: %s",
                   name ? name : "(null)");

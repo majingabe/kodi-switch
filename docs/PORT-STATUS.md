@@ -2429,3 +2429,43 @@ coverage.
 Caveat measured along the way: a 7 MB skin download exhausts the BSD socket pool and
 takes JSON-RPC down until it finishes (the GUI stays responsive). Installing several
 add-ons in a row will hit the same limit.
+
+## 2026-11-15 - Second static binary add-on: pvr.iptvsimple loads (still crashes later)
+
+Goal: make an official-repository PVR client work, generalising the static-link
+mechanism that inputstream.adaptive uses.
+
+**Built from source.** Piers branch of kodi-pvr/pvr.iptvsimple (22.6.5, PVR API 9.2.0,
+which matches our Kodi exactly). Dependencies built for aarch64-none-elf and installed
+into the project portlibs: pugixml 1.14 and xz/liblzma 5.6.3; zlib came from devkitPro.
+
+**Three obstacles, in the order they appeared:**
+
+1. `ADDON_Create` / `ADDON_GetTypeVersion` / `ADDON_GetTypeMinVersion` are exported by
+   every binary add-on, so two of them collide at link time. Fixed by compiling with
+   `-DADDON_Create=PVR_ADDON_Create` (etc.) and dispatching in the shim on the add-on
+   path (`switch_dlopen` returns a second handle for `pvr.iptvsimple`).
+2. `kodi::addon::CPrivateBase::m_interface` is defined in each add-on by the
+   `ADDONCREATOR` macro, so it collides too. `objcopy --redefine-sym` on the archive was
+   tried and *did not work* - the add-on loaded but crashed in `kodi::Log` with
+   `m_interface` null (`ldr x3, [x0, #24]`, x0 = 0), because the assignment and the read
+   bound to different copies. `-Wl,--allow-multiple-definition` also failed, for the same
+   reason: it hides the duplicate instead of separating it.
+   **Working fix: compile the add-on with `-Dkodi=iptv_kodi`**, giving it its own copy of
+   the entire SDK namespace. Verified in the archive:
+   `_ZN9iptv_kodi5addon12CPrivateBase11m_interfaceE`.
+3. Packaging: `library_switch="pvr.iptvsimple.a"` in the generated addon.xml plus a
+   zero-byte file of that name, and the folder shipped in the runtime tree. The addon.xml
+   also had to drop its `inputstream.ffmpegdirect` / `inputstream.rtmp` imports - both are
+   binary add-ons we cannot load, and Kodi refuses to enable a client with missing deps.
+
+**State at the end of the session:** Kodi starts, the client is enabled, and
+`PVR_ADDON_Create returned 0` appears in boot.log - the load path works. But Kodi then
+crashes once the PVR manager asks the client for channels (with a test M3U configured in
+`addon_data/pvr.iptvsimple/settings.xml`). The newest crash report is on the SD card and
+has not been read yet; that is the next step.
+
+Also learned: `Settings.SetSettingValue` does not accept add-on settings in this Kodi
+version (returns Invalid params), so add-on settings have to be written as
+`addon_data/<addonid>/settings.xml`; and the add-on type enum is `kodi.pvrclient`, not
+`xbmc.pvrclient`.

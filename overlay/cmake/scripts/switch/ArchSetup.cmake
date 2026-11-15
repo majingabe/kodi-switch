@@ -118,6 +118,12 @@ link_directories("${SWITCH_PREFIX}/build-isa/lib/webm_parser")
 link_directories("${SWITCH_PREFIX}/isa-deps/lib")
 list(APPEND DEPLIBS inputstream.adaptive mpegts webm_parser ap4 pugixml)
 
+# pvr.iptvsimple, same static mechanism. Built with prefixed entry points
+# (PVR_ADDON_Create) so it and ISA can coexist; PlatformSwitch.cpp dispatches on the
+# add-on path. lzma comes from the project portlibs.
+link_directories("${SWITCH_PREFIX}/build-iptv")
+list(APPEND DEPLIBS pvr.iptvsimple lzma)
+
 # ffmpeg's DASH demuxer needs libxml2; static ffmpeg archives do not carry their
 # dependencies. The archives are linked by full path after DEPLIBS, so libxml2 has
 # to come last - CMake appends the standard libraries at the end of the line.
