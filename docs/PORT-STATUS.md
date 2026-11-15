@@ -2534,3 +2534,42 @@ rather than asking the user to reconstruct the list by hand.
 
 Also worth knowing when toggling: do not `SetAddonEnabled` while the PVR manager is
 starting - it aborts the start and produces a false "could not validate M3U".
+
+### Addons33.db rebuild: enabled set restored (closed)
+
+Recovered the pre-rebuild enabled set from `Database.build-broken/Addons33.db`
+(table `installed`, column `enabled`, opened with `mode=ro&immutable=1` - plain
+`mode=ro` returns `disk I/O error` on FAT because SQLite tries to lock).
+71 add-ons were enabled before the rebuild.
+
+Re-enabled the 8 that were on and had come back off:
+
+    script.module.beautifulsoup4   script.module.soupsieve
+    script.module.kodi-six         script.module.simplejson
+    script.module.pyqrcode         script.module.resolveurl
+    script.module.inputstreamhelper  plugin.program.chef21
+
+All verified `enabled=True`. `plugin.video.watchnixtoons2` was re-enabled first and
+**the user confirmed on the console that it works** - menus open and content plays.
+That is the acceptance test; RPC listings are not (they compete for the socket pool
+and they are not usage).
+
+Deliberately left off: `plugin.video.thecrew` (v3.2.2) plus its modules
+`script.module.thecrew` and `script.thecrew.artwork`, and `script.module.cocoscrapers`.
+The Crew declares `xbmc.service`, so it runs on every start and is a known socket-pool
+consumer on this port. The user's call: leave it off unless it breaks something else.
+Nothing else depends on it - `script.module.resolveurl` (the dependency other add-ons
+actually use) is enabled.
+
+Trap found while doing this, worth remembering: `Addons.GetAddons` **without** a type
+filter does not report the `kodi.binary.*` / `xbmc.*` system add-ons, and the `enabled`
+property in that bulk listing proved unreliable - a diff built on it reported
+"0 were on and are now off" while `plugin.video.thecrew` was in fact still off.
+`Addons.GetAddonDetails` with `properties: ["enabled","version"]` is the trustworthy
+oracle. Do not add `type` to that properties list; it makes the whole call return
+`-32602 Invalid params` for every add-on, which looks like mass breakage and is not.
+
+Open, cosmetic: after the restore Kodi shows a "check the log for more information"
+notification. The current session's `kodi.log` is locked (`EIO`), `boot.log` does not
+exist on this build and `kodi.old.log` is the earlier 08:24 session, so it can only be
+read after the next restart, when this session rotates into `kodi.old.log`.
