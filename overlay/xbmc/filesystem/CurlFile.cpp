@@ -1191,14 +1191,6 @@ bool CCurlFile::Open(const CURL& url)
   m_opened = true;
   m_seekable = true;
 
-#if defined(TARGET_SWITCH)
-  {
-    char tbuf[384];
-    std::snprintf(tbuf, sizeof(tbuf), "curl open enter: %s", url.Get().c_str());
-    switch_trace(tbuf);
-  }
-#endif
-
   CURL url2(url);
   ParseAndCorrectUrl(url2);
 
@@ -1315,10 +1307,6 @@ bool CCurlFile::Open(const CURL& url)
     }
     m_url = efurl;
   }
-
-#if defined(TARGET_SWITCH)
-  switch_trace("curl open ok");
-#endif
 
   return true;
 }

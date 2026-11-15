@@ -17,6 +17,7 @@
 #include <cstring>
 #include <csignal>
 #include <cerrno>
+#include <ctime>
 #include <cxxabi.h>
 #include <exception>
 #include <vector>
@@ -228,10 +229,15 @@ extern "C" void switch_preinit()
   if (access("/switch/kodi/repair-addons-db", F_OK) == 0)
   {
     const char* db = "/switch/kodi/.kodi/userdata/Database/Addons33.db";
-    const char* kept = "/switch/kodi/.kodi/userdata/Database/Addons33.db.corrupt";
+    // Timestamped target: on FAT a rename onto an existing name can fail, and a
+    // fixed ".corrupt" would make a second repair a silent no-op.
+    char kept[160];
+    std::snprintf(kept, sizeof(kept),
+                  "/switch/kodi/.kodi/userdata/Database/Addons33.db.corrupt-%lld",
+                  static_cast<long long>(std::time(nullptr)));
     const int renamed = std::rename(db, kept);
     std::remove("/switch/kodi/repair-addons-db");
-    char rbuf[192];
+    char rbuf[224];
     std::snprintf(rbuf, sizeof(rbuf), "addons db repair: rename rc=%d, old db kept at %s", renamed,
                   kept);
     switch_trace(rbuf);
