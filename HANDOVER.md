@@ -8,6 +8,10 @@ Written 2026-11-14 at the end of a long session. Read this first; then
 A local build (not a release) containing everything below. It is newer than
 `v22.0rc3` and includes the add-ons database repair hook.
 
+**The repo is one commit ahead of the deployed build.** `764e3bf` removed the
+per-request `curl open` traces and timestamped the database-repair target. Those are
+committed but **not built or deployed** — the next build picks them up.
+
 ## Shipped
 
 - `v22.0rc3` — https://github.com/MajinGabe/kodi-switch/releases/tag/v22.0rc3
