@@ -2503,3 +2503,34 @@ preinit and around the first CFile::Open of an http:// URL - rather than more gu
 Note for the next session: do NOT toggle the add-on with SetAddonEnabled while the PVR
 manager is starting; that aborts the start and produced a false "could not validate M3U"
 earlier.
+
+## 2026-11-15 - Addons33.db rebuild side effect: every add-on comes back disabled
+
+The one-shot `repair-addons-db` hook (committed 187797c) rebuilt a corrupt
+`Addons33.db`. It restored repository listing and "Get more...", but it did **not**
+carry over enabled states: after the rebuild 106 of 117 add-ons read `enabled: false`,
+including `plugin.video.watchnixtoons2` - the one add-on that was actually in daily use.
+
+Symptom the user reports: "it broke my add-on". The add-on is present, correct version,
+files intact - only the flag is off, so it vanishes from the UI.
+
+Diagnosis that separates this from a real breakage:
+
+- `Addons.GetAddonDetails` -> `enabled: False` (this is the whole answer)
+- `Files.GetDirectory` on a disabled plugin -> `-32602 Invalid params.`
+- after `Addons.SetAddonEnabled {enabled: true}`, exercise a listing that really hits the
+  network, not just the root menu (nixtoons builds its root menu locally):
+  - root `plugin://plugin.video.watchnixtoons2/` -> 11 items, 4.6 s
+  - `?action=actionCatalogMenu&path=latest` -> 16 items, 6.0 s, current 2026 episodes
+
+So: **after any Addons33.db rebuild, re-enable the add-ons the user actually uses.**
+Do not read "add-on missing from the list" as a code or packaging regression until the
+enabled flag has been checked - the DB rebuild is the first suspect, not the last.
+
+Recovery path for the enabled set: the pre-rebuild database is kept as
+`Database/Addons33.db.corrupt`, and its `addon.enabled` column is the authoritative
+record of what was on. Read it read-only (`file:...?mode=ro`, sqlite3 from the probe)
+rather than asking the user to reconstruct the list by hand.
+
+Also worth knowing when toggling: do not `SetAddonEnabled` while the PVR manager is
+starting - it aborts the start and produces a false "could not validate M3U".
