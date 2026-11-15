@@ -117,7 +117,7 @@ Next when console is available:
 2. probe 9090 -> if up, baseline is restored; then re-add ONE feature at a time:
    analog sticks -> trace server -> microhttpd -> webserver setting -> Python
 3. keep `boot.log` (do not delete) so the failing step is visible; also keep any
-   Atmosphère crash report from `atmosphere/crash_reports`
+   Atmosphï¿½re crash report from `atmosphere/crash_reports`
 
 ## 2026-11-10 resolution: applet mode was the red herring
 The "regressions" were applet-mode launches (hbmenu started from Album, ~400 MB heap).
@@ -821,7 +821,7 @@ Progression on the exit path:
   CApplication::Cleanup() entirely on Switch, so the process ends in ~4 s.
 - Result: the applet closes but hbloader reports "unable to load software"; the
   screen keeps the last frame (pointer + debug overlay) until the message is
-  dismissed with OK, then the console returns home normally. No Atmosphère fatal.
+  dismissed with OK, then the console returns home normally. No Atmosphï¿½re fatal.
 
 std::_Exit is NOT an option: it produced 2349-0008 with all registers zero.
 So an entirely clean exit needs the remaining teardown to stop faulting, or a
@@ -984,7 +984,7 @@ application thread, while copying files out of the package. It is NOT the video
 player, and every crash report on the card stops at this one - there is no report
 from the MKV playback at all.
 
-Consequence: the MKV playback death produced no Atmosphère report. A process that
+Consequence: the MKV playback death produced no Atmosphï¿½re report. A process that
 is killed without a fault report is consistent with resource exhaustion (memory /
 handles) rather than a data abort. The screenshot the user sent is this installer
 report (same LR, _close_r + 0x5c), which was the newest one on the card.
@@ -1611,7 +1611,7 @@ To apply next session, one of:
 ## 2026-11-12 18:05 - CRASH after ~30 s of HEVC playback over HTTP: diagnosed and fixed
 
 Symptom: playback of One Pace S18E01 (1080p, 10-bit HEVC) over http://<pc-ip>:8003
-ran for roughly half a minute, then Atmosphère showed a crash screen. No crash report
+ran for roughly half a minute, then Atmosphï¿½re showed a crash screen. No crash report
 was written (newest /atmosphere/crash_reports/*.log was 15:30, i.e. hours earlier), so
 the process died without a fault report.
 
@@ -1729,7 +1729,7 @@ return EIO because the FAT driver allows one writer and no second opener. Only k
 
 ## 2026-11-12 18:30 - The real crash: a failed thread creation, not the decoder
 
-Atmosphère finally produced a report for this one (all four of today's reports share the
+Atmosphï¿½re finally produced a report for this one (all four of today's reports share the
 same signature):
   Result 0x4A8 (2168-0002), Process hbloader, Type Data Abort, Address 0x20,
   Fault Address 0x0 - i.e. a null dereference, and the PC is in _write_r:
@@ -2398,5 +2398,12 @@ the repair only `repository.xbmc.org` was enabled; the other 64 repositories wer
 present but disabled, and the probe add-on needed re-enabling.
 
 Result: the add-on manager reports **14 skins and 19 UI sound packs** available from
-repositories, where it previously reported none. (Hand confirmation of the UI still
-pending - automated queries are a proxy, not proof.)
+repositories, where it previously reported none. Confirmed by hand on the console:
+"Install from repository" lists content again and the skin selector's "Get more..."
+entry is back.
+
+Note on installing a skin: a 7 MB skin download was enough to exhaust the BSD socket
+pool and take JSON-RPC down for the duration (connections refused while the GUI stayed
+responsive). It recovers, but it is the same pool limit that bit playback earlier -
+installing several add-ons back to back will do it. Worth remembering before assuming
+"remote control broke".
