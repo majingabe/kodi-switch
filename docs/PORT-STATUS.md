@@ -2372,3 +2372,31 @@ Hand-tested: playback over Bluetooth is clean, with no sync or stability problem
 reported ("perfect"). The audio path is `CAESinkSwitch` -> `audout`, which Horizon
 mixes, so Bluetooth is transparent to Kodi - no port-side latency compensation is
 needed. Speakers, wired headphones and Bluetooth are now all confirmed on hardware.
+
+## 2026-11-14 - Every repository listed nothing: corrupt Addons33.db, and a repair hook
+
+Symptom: Settings -> Add-ons -> Install from repository showed nothing for any
+repository, and the "Get more..." entry was missing from the skin selector. Kodi was
+otherwise healthy - playback, JSON-RPC and add-on installs by id all worked.
+
+Cause: `Addons33.db` was corrupt. `CAddonDatabase::GetRepositoryContent` failed with
+`SQLITE_CORRUPT` on every start, so the add-on manager believed no repository offered
+anything. Kodi hides "Get more..." when it cannot enumerate add-ons of that type, which
+is why the option vanished rather than showing an error.
+
+Why it could not be fixed in place: on FAT a file open for writing cannot be opened a
+second time (`EIO`), and Kodi holds the only handle for the whole session. `os.rename`
+from inside Kodi also fails with `EIO`.
+
+Fix: a one-shot repair in `switch_preinit()`, before Kodi opens the database. Create
+`/switch/kodi/repair-addons-db`; on the next start the port renames `Addons33.db` to
+`Addons33.db.corrupt`, removes the marker and traces `addons db repair: rename rc=0`.
+Kodi then creates a fresh database and re-registers the add-ons already on disk.
+
+Cost, stated up front: a fresh database forgets enabled states and repo links. After
+the repair only `repository.xbmc.org` was enabled; the other 64 repositories were
+present but disabled, and the probe add-on needed re-enabling.
+
+Result: the add-on manager reports **14 skins and 19 UI sound packs** available from
+repositories, where it previously reported none. (Hand confirmation of the UI still
+pending - automated queries are a proxy, not proof.)

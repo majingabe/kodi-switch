@@ -220,6 +220,23 @@ extern "C" void switch_preinit()
     }
   }
 
+  // One-shot add-on database repair. A corrupt Addons33.db makes every repository
+  // list empty ("Install from repository" shows nothing) and it cannot be repaired
+  // while Kodi holds the only handle on FAT, so do it here, before the database is
+  // opened. Arm it by creating /switch/kodi/repair-addons-db; the marker is removed
+  // once the repair has run, so it never repeats.
+  if (access("/switch/kodi/repair-addons-db", F_OK) == 0)
+  {
+    const char* db = "/switch/kodi/.kodi/userdata/Database/Addons33.db";
+    const char* kept = "/switch/kodi/.kodi/userdata/Database/Addons33.db.corrupt";
+    const int renamed = std::rename(db, kept);
+    std::remove("/switch/kodi/repair-addons-db");
+    char rbuf[192];
+    std::snprintf(rbuf, sizeof(rbuf), "addons db repair: rename rc=%d, old db kept at %s", renamed,
+                  kept);
+    switch_trace(rbuf);
+  }
+
   // Python: point the interpreter at the stdlib on the SD card, but only when it
   // is actually present - a bad PYTHONHOME makes Py_Initialize abort.
   {
