@@ -7,6 +7,9 @@ Written 2026-11-14 at the end of a long session. Read this first; then
 > It is mandatory, and every item in it exists because skipping it already cost us
 > a session — including the `Addons33.db` rebuild that silently disabled 106 of 117
 > add-ons and was reported as "it broke my add-on".
+>
+> **This file is superseded by `MIGRATION.md` (2026-11-16)** — that is the self-contained
+> document to hand to a fresh session. Keep this one for the per-area fix detail.
 
 ## What is deployed on the console right now
 
