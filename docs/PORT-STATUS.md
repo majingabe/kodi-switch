@@ -2759,3 +2759,47 @@ Everything done by hand on this console (service strips, instance-settings edits
 **Not shippable, keep as notes only:** third-party add-on bugs (lookmovietomb
 `play_item`), dead upstreams (popcornflix 404), DRM (crackle), per-card service
 strips, and any hand-edited instance settings.
+
+## 2026-11-18 - DB repair, first attempt: VACUUM is not usable on FAT
+
+Tried the in-place recovery in `switch_preinit`: open `Addons33.db`, `VACUUM INTO` a
+clean copy, swap it in. Built, deployed via netlink, ran on hardware. Result:
+
+    addons db repair: recovery failed, rename rc=0, old db kept at
+      /switch/kodi/.kodi/userdata/Database/Addons33.db.corrupt-1795057867
+
+The fallback (the old behaviour) then ran, so Kodi recreated an empty DB and **all
+add-ons came back disabled** - the exact regression the change was meant to stop.
+Confirmed by `Addons.GetAddonDetails`: every entry `enabled=False`.
+
+Why: **`VACUUM` cannot run on this filesystem.** Reproduced outside the port with
+Python's sqlite3 on the same file - `VACUUM INTO` fails with `disk I/O error` even
+when the source opens fine and `pragma integrity_check` is `ok` on the read-only
+copy. So it is not a C++ bug and not a corrupt DB: SQLite's temp/journal handling
+does not work on the SD's FAT via this devoptab. Any "repair the database in place"
+design is dead.
+
+**What still works:** the old DB is fully readable read-only
+(`mode=ro&immutable=1`), and its `installed.enabled` column held 112 entries. The
+enabled set was restored on the card through the add-on manager (84 applied; the 28
+"failures" are `kodi.binary.*` system add-ons that cannot be toggled, which is
+harmless). All dependency modules add-ons rely on are enabled
+(`six`, `requests`, `routing`, `dateutil`, `t1mlib`, `urllib3`, `certifi`, `chardet`,
+`idna`, `resolveurl`, `simplecache`, `kodi-six`, `beautifulsoup4`, `soupsieve`,
+`simplejson`, `pyqrcode`, `inputstreamhelper`, `inputstream.adaptive`).
+
+**Corrected design for the shippable fix:** no SQLite writes at all.
+
+1. At preinit, read `installed.enabled` from the old DB **read-only** and write the
+   list to a sidecar file (e.g. `addons-enabled.txt`).
+2. After the add-on manager has loaded (post-DB-init), re-apply that list through
+   `CAddonMgr` / `Addons.SetAddonEnabled` semantics.
+3. Delete the sidecar when applied, so it is one-shot like the marker.
+
+That is entirely within what this platform can do: read a file, write a text file,
+call the add-on manager. It needs a hook after add-on load, which is the only open
+design question.
+
+**Trap worth remembering:** a Python `sqlite3.connect()` that is not closed on the
+error path leaves a handle open, and on FAT every later `stat`/`open` of that file
+returns `EIO` - it looks like the file vanished. Close in `finally`, always.
