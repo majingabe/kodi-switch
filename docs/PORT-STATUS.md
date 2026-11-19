@@ -2573,3 +2573,189 @@ Open, cosmetic: after the restore Kodi shows a "check the log for more informati
 notification. The current session's `kodi.log` is locked (`EIO`), `boot.log` does not
 exist on this build and `kodi.old.log` is the earlier 08:24 session, so it can only be
 read after the next restart, when this session rotates into `kodi.old.log`.
+
+## 2026-11-18 - Sockets are the real budget; two add-ons fixed (one by patch, one by service strip)
+
+Machine rebuilt on the new PC (MINIMAJIN): WSL 3.0.5, Ubuntu imported from the
+backup, devkitA64 16.1.0, full rebuild verified (969 targets, kodi.bin 130M,
+kodi.nro 80M). Console is now 192.168.1.186, PC 192.168.1.223.
+
+**Socket budget, measured inside Kodi via script.pyprobe /exec:**
+
+    idle, EventServer + zeroconf + 4 services on : 2 free sockets (errno 105)
+    after services.esenabled=False, zeroconf=False: 4 free (5 with 9090 down)
+    after stripping 3 add-on services:            4 free (no change at idle)
+
+So the stripped add-on services were not holding sockets at idle. What actually helped
+was turning off EventServer and zeroconf: +2 sockets. `plugin.googledrive` and
+`script.module.clouddrive.common` were already disabled from the 11-12 session.
+
+**Playback does not leak a socket.** Measured free count before and after a
+3-minute playback: 4 -> 4. The earlier "first plays, second fails" was NOT a leak;
+that second title (The Little Match Girl) is simply a dead source. Betty Boop from
+the same add-on plays fine, repeatedly.
+
+**plugin.video.bnwmovie19 (Diggz) works** - first time. 720p-ish H.264 playing at
+1x, screenshots confirm. This is the first non-official add-on to play on this port.
+No code change; it needed the socket headroom.
+
+**plugin.video.lookmovietomb - real bug, patched in place.** Error dialog, and
+kodi.old.log gave the truth:
+
+    UnboundLocalError: cannot access local variable 'play_item'
+      main.py:635  play_item.setProperty('inputstream.adaptive.manifest_type','hls')
+
+The add-on creates `play_item` only inside `if is_helper.check_inputstream():`, then
+uses it unconditionally. inputstreamhelper cannot satisfy itself on this port, so the
+branch never runs and the following line crashes. Fix (applied on the card, backup
+`main.py.bak-inputstream`): build the ListItem before the branch, set the inputstream
+properties only inside it. Result: Lunopolis (1:37:19) plays. _This is a genuine
+add-on bug, not a port bug, and it is exactly the class a compatibility patcher
+should encode: never assume the ISA helper succeeds._
+
+**plugin.video.newson - not a code bug.** `script.module.simplecache` returns None:
+
+    TypeError: 'NoneType' object does not support the context manager protocol
+      simplecache.py _execute_sql -> with self._get_database()
+
+`_get_database()` connects, runs SELECT, and on failure deletes and recreates the DB.
+Both fail with "unable to open database file" while `Skin Helper Simplecache` logs
+the same error on the same file the same second. FAT allows one handle per file, so
+two consumers cannot share simplecache.db. The DB itself is fine (5.9 MB,
+`pragma integrity_check` = ok, read-only). Untested fix: stop the skin-helper service
+(`script.aeon.tajo.helper`) before using NewsON.
+
+**Trap confirmed on this build:** 9090 is gated by `services.esenabled`. Turning
+EventServer off to free a socket also kills JSON-RPC until it is turned back on -
+re-enabling restored 9090 immediately, no restart needed. Do not disable it blind.
+
+**Add-on service strip, applied on the card (backups `addon.xml.bak-service`):**
+`plugin.video.lookmovietomb`, `plugin.video.newson`, `plugin.video.youtube`.
+Measured services at boot: 4 -> 1 (only `script.aeon.tajo.helper`). Idle socket count
+did not change, so the benefit is indirect (they stop holding sockets while active),
+but it is harmless and keeps the pool free during browsing.
+
+**Reading logs without file access:** `Files.PrepareDownload` is not implemented on
+this build, and `/log?n=` cannot open kodi.log while Kodi holds it. What works:
+restart Kodi, then read `/switch/kodi/temp/kodi.old.log` through
+`script.pyprobe`'s `/exec` (it is closed by then). Tracebacks are multi-line; grep
+for "EXCEPTION Thrown" and print the following ~25 lines.
+
+## 2026-11-18 (later) - Live TV: playlist and channels work, PLAYBACK DOES NOT START
+
+**Status, stated precisely:** the PVR manager starts, the client parses the M3U, and
+channels appear (group "Test", then a real 5-channel live playlist). Pressing OK on a
+channel - in the Guide or in the channel list - does nothing. `Player.Open` with
+`channelid` returns OK but `Player.GetActivePlayers` stays empty, and `boot.log` shows
+**no `CFile::Open` for the stream at all**, so the failure is before the player.
+
+Ruled out:
+
+- the stream: `xbmc.Player().play(<same m3u8>)` from the probe -> **PLAYING after 2s**,
+  `getPlayingFile` returns the m3u8. Decoder and network are fine.
+- ISA tagging: the client's `useInputstreamAdaptiveforHls` is already `false` and
+  `defaultInputstream` is empty, so it is not handing the player an inputstream addon.
+- EPG: playing from the channel list (no guide data) fails identically, so the empty
+  EPG is not the cause. (It does make the Guide unplayable, separately.)
+
+So the defect is in the PVR client -> player handover on this port: the client's
+`GetChannelStreamProperties` result is not producing a playable item. That is inside
+the statically linked pvr.iptvsimple (C++ in kodi.bin), not a Python add-on, so it
+needs a build-level investigation, not a card patch.
+
+**Root cause of the original stall (still valid and useful):** the client had no URL.
+Kodi 19+ keeps per-instance client settings in
+`addon_data/pvr.iptvsimple/instance-settings-1.xml`; `settings.xml` is legacy and
+ignored. There the playlist was still at its default:
+
+    <setting id="m3uPathType" default="true">1</setting>
+    <setting id="m3uUrl" default="true" />          <- no value at all
+
+`ConnectionManager::Process()` does `url.empty()` -> `SteppedSleep(interval)` ->
+`continue`. No error is logged, `SetState(CONNECTED)` is never called, so
+`CPVRManager::UpdateComponents()` keeps skipping the client and the manager sits at
+STATE_STARTING. `LoadPlayList()` is never reached - which is why the 11-15 entry's
+"pinned inside LoadPlayList" reading was wrong.
+
+**Fix (applied, backups kept):** real values written into the instance file -
+
+    <setting id="m3uPathType">1</setting>
+    <setting id="m3uUrl">http://192.168.1.223:8003/test-live.m3u</setting>
+
+`default="true"` is Kodi's marker for "user never set this"; the client treats it as
+empty.
+
+**Verified:** `PVR.GetProperties -> available: true`; 5 channels parsed from a real
+live playlist (NASA TV, Red Bull TV, France 24, DW English, CBS News), all confirmed
+alive from the PC minutes earlier.
+
+**Secondary cause removed:** `sources.xml` ("PC Videos") and the PVR m3uUrl both still
+pointed at `192.168.1.234`, the decommissioned laptop, so every UI load paid a
+connect timeout against a dead host. Both now use `192.168.1.223` (this PC). The
+media server serves `C:\dev\media` on 8003.
+
+## 2026-11-18 - Tooling facts learned the hard way
+
+- **9090 reply framing**: requests are 4-byte big-endian length-prefixed, but
+  **replies are bare JSON with no prefix**. A client that waits for a length header
+  hangs on every call. (`kodi-rpc.py` now tries both.)
+- **`Files.PrepareDownload` is not implemented** on this build, so RPC cannot hand
+  you a file. Log access is: restart Kodi, then read `kodi.old.log` (the live
+  `kodi.log` returns `EIO` on FAT while Kodi holds it).
+- **script.pyprobe reads only the first TCP segment** of a request (single
+  `recv(8192)`), so `/exec` silently truncates payloads over ~1.4 KB. Upload big
+  scripts in ~700-char chunks and exec the assembled file.
+- **`/exec` shares one interpreter** across calls: a `resources` package imported by
+  one add-on stays in `sys.modules` and poisons the next add-on's import. Purge
+  `sys.modules` between runs. Same for dependency paths - Kodi resolves `<import>`
+  transitively; a harness that only follows direct deps reports false
+  `ModuleNotFoundError`s (`six`, `urllib3`).
+- **Disabled is not broken.** 8 of 17 `plugin.video.*` add-ons were disabled after the
+  Addons33.db rebuild; the UI looks identical. Check
+  `Addons.GetAddonDetails -> enabled` first, every time.
+
+## 2026-11-18 - Add-on failure taxonomy (measured, not guessed)
+
+| Add-on | Class | Verdict |
+|---|---|---|
+| `bnwmovie19` | socket budget | works after +2 sockets |
+| `lookmovietomb` | code bug (`play_item` unbound when ISA helper fails) | patched, plays |
+| `popcornflix` | dead backend API | `api.unreel.me` returns 404, unfixable |
+| `newson` | FAT single-handle contention on `simplecache.db` | unresolved |
+| `pluto` | flagged `Broken` in Addons33.db; code runs clean in-process | unresolved |
+| `crackle` | Widevine DRM | impossible on this port |
+
+Socket pool measured in-process: 2 free with EventServer + zeroconf on, 4 with them
+off (5 with 9090 down). Playback does not leak a socket (4 -> 4 after a 3-minute
+play). Turning `services.esenabled` off **also kills 9090** on this build; turning it
+back on restores it immediately, no restart.
+
+## 2026-11-18 - Shippable backlog (constraint: anything shipped must work on a stock console)
+
+The Homebrew App Store rule: a fix only counts if a fresh download reproduces it.
+Everything done by hand on this console (service strips, instance-settings edits,
+`.bak` files, disabled services) is diagnosis, not product.
+
+**Ours to fix, in code:**
+
+1. **Addons33.db repair must preserve enabled state.** The preinit hook renames a
+   corrupt `Addons33.db` and Kodi recreates it empty; 106 of 117 add-ons came back
+   `enabled: false`, and the user reads that as "it broke my add-ons". The old DB is
+   kept as `Addons33.db.corrupt-<ts>`; the hook can read `installed.enabled` from it
+   and re-apply the set before Kodi opens the database. Small, self-contained, ours.
+
+2. **PVR channel playback never reaches the player.** Channels list, `Player.Open`
+   with `channelid` returns OK, no player appears, and `boot.log` shows no
+   `CFile::Open` for the stream. Same URL plays when handed to `xbmc.Player()`.
+   Next step is a build: instrument `GetChannelStreamProperties` in the statically
+   linked pvr.iptvsimple and confirm it is called and what it returns. Other
+   homebrew PVR/IP电视 apps in the store prove the platform can do it.
+
+3. **Socket budget.** 2 free sockets at idle is the real constraint behind several
+   "add-on does nothing" reports. Belongs in `SocketInitConfig`, measured per
+   variant from the preinit gauge, shipped as a build default - not as a user
+   setting that changes 9090 behaviour.
+
+**Not shippable, keep as notes only:** third-party add-on bugs (lookmovietomb
+`play_item`), dead upstreams (popcornflix 404), DRM (crackle), per-card service
+strips, and any hand-edited instance settings.
