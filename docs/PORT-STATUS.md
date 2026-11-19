@@ -2803,3 +2803,32 @@ design question.
 **Trap worth remembering:** a Python `sqlite3.connect()` that is not closed on the
 error path leaves a handle open, and on FAT every later `stat`/`open` of that file
 returns `EIO` - it looks like the file vanished. Close in `finally`, always.
+
+## 2026-11-18 - PlaylistBrowser / DaddyLive: upstream blocks this network, not a port bug
+
+`plugin.video.playlistbrowser` ("Diggz TV Guide Lite") lists 459 channels with full
+EPG and fails at playback. Traced, not guessed:
+
+- It runs a local relay: `DLHD service: Relay listening on 127.0.0.1:8769`.
+- Its channel refresh throws `URLError` in `dlhd/resolver.py:40` (`fetch`).
+- Base URL is `https://thedaddy.li` (`dlhd/source.py`), endpoint
+  `/24-7-channels.php`.
+- From the console: `SSL: TLSV1_ALERT_ACCESS_DENIED`, with **and** without
+  certificate verification.
+- From this PC, same host: `curl: (35) schannel: SEC_E_LOGON_DENIED
+  (0x8009030c)`. DNS resolves to 213.21.239.30.
+
+The server refuses the TLS handshake from this network regardless of client, so it
+is a block/geo restriction, not the port's CA bundle and not a Python problem. No
+amount of work on our side changes it.
+
+Separately, the add-on also fails on FAT filesystem semantics:
+
+    FileExistsError: [Errno 17] File exists: .../refresh-state.json.<hash>.tmp
+
+It uses atomic rename (os.replace) which FAT does not provide. That is an add-on
+bug worth reporting upstream, and it is the same class as the DB repair trap.
+
+**Consequence for the backlog:** the guide UI is a dead end on this network. Live TV
+via the PVR client remains the only locally-controllable path, and its failure is a
+genuine port defect (see the entry above), not an upstream one.
