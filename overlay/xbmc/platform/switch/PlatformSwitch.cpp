@@ -24,6 +24,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sqlite3.h>
 #include <switch.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -226,20 +227,55 @@ extern "C" void switch_preinit()
   // while Kodi holds the only handle on FAT, so do it here, before the database is
   // opened. Arm it by creating /switch/kodi/repair-addons-db; the marker is removed
   // once the repair has run, so it never repeats.
+  //
+  // The database cannot be repaired in place: SQLite's VACUUM needs write and temp
+  // support that the SD's FAT does not provide (measured: "disk I/O error", both
+  // in-process and from Python on the same file). Kodi therefore recreates the
+  // database empty, which silently disables every add-on. So export the enabled ids
+  // first, keep the old file, and let the bundled service add-on re-apply the list
+  // once the add-on manager is up (service.switch.repair).
   if (access("/switch/kodi/repair-addons-db", F_OK) == 0)
   {
     const char* db = "/switch/kodi/.kodi/userdata/Database/Addons33.db";
+    const char* sidecar = "/switch/kodi/addons-enabled.txt";
     // Timestamped target: on FAT a rename onto an existing name can fail, and a
     // fixed ".corrupt" would make a second repair a silent no-op.
     char kept[160];
     std::snprintf(kept, sizeof(kept),
                   "/switch/kodi/.kodi/userdata/Database/Addons33.db.corrupt-%lld",
                   static_cast<long long>(std::time(nullptr)));
+
+    int exported = 0;
+    sqlite3* handle = nullptr;
+    if (sqlite3_open_v2(db, &handle, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK)
+    {
+      sqlite3_stmt* stmt = nullptr;
+      if (sqlite3_prepare_v2(handle, "SELECT addonID FROM installed WHERE enabled=1", -1, &stmt,
+                             nullptr) == SQLITE_OK)
+      {
+        if (FILE* out = std::fopen(sidecar, "w"))
+        {
+          while (sqlite3_step(stmt) == SQLITE_ROW)
+          {
+            const auto* id = sqlite3_column_text(stmt, 0);
+            if (id != nullptr)
+            {
+              std::fprintf(out, "%s\n", reinterpret_cast<const char*>(id));
+              ++exported;
+            }
+          }
+          std::fclose(out);
+        }
+        sqlite3_finalize(stmt);
+      }
+      sqlite3_close(handle);
+    }
+
     const int renamed = std::rename(db, kept);
     std::remove("/switch/kodi/repair-addons-db");
-    char rbuf[224];
-    std::snprintf(rbuf, sizeof(rbuf), "addons db repair: rename rc=%d, old db kept at %s", renamed,
-                  kept);
+    char rbuf[256];
+    std::snprintf(rbuf, sizeof(rbuf),
+                  "addons db repair: exported %d enabled id(s), rename rc=%d", exported, renamed);
     switch_trace(rbuf);
   }
 

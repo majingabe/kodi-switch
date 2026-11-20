@@ -2343,10 +2343,16 @@ bool CApplication::PlayFile(CFileItem item, const std::string& player, bool bRes
   using enum CApplicationPlay::GatherPlaybackDetailsResult;
 
   CApplicationPlay appPlay{*stackHelper};
-  if (const auto result{appPlay.GatherPlaybackDetails(item, player, bRestart)};
-      result == RESULT_ERROR)
+  const auto gatherResult{appPlay.GatherPlaybackDetails(item, player, bRestart)};
+  {
+    char tbuf[220];
+    std::snprintf(tbuf, sizeof(tbuf), "PlayFile: gather=%d path=%s",
+                  static_cast<int>(gatherResult), item.GetPath().c_str());
+    switch_trace(tbuf);
+  }
+  if (gatherResult == RESULT_ERROR)
     return false;
-  else if (result == RESULT_NO_PLAYLIST_SELECTED)
+  else if (gatherResult == RESULT_NO_PLAYLIST_SELECTED)
   {
     m_cancelPlayback = true;
     return true; // Special case; not to be treated as error.

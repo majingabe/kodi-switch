@@ -28,6 +28,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(TARGET_SWITCH)
+extern "C" void switch_trace(const char* msg);
+#endif
+
 #ifdef TARGET_POSIX
 #include <errno.h>
 #include <inttypes.h>
@@ -187,6 +191,16 @@ static CURLcode PerformWithTransientRetries(CURL_HANDLE* easyHandle,
   for (int attempt = 0; attempt <= maxRetries; ++attempt)
   {
     result = g_curlInterface.easy_perform(easyHandle);
+#if defined(TARGET_SWITCH)
+    if (result != CURLE_OK)
+    {
+      char tbuf[320];
+      std::snprintf(tbuf, sizeof(tbuf), "curl perform: code=%d (%s) url=%s",
+                    static_cast<int>(result), g_curlInterface.easy_strerror(result),
+                    url.GetRedacted().c_str());
+      switch_trace(tbuf);
+    }
+#endif
     if (!IsTransientCurlError(result) || attempt == maxRetries)
       break;
 
@@ -783,11 +797,19 @@ void CCurlFile::SetCommonOptions(CReadState* state, bool failOnError /* = true *
   g_curlInterface.easy_setopt(h, CURLOPT_BUFFERSIZE, 256L * 1024);
 #endif
 
+#if defined(TARGET_SWITCH)
+  // HTTP/2 becomes unusable on this port: the handshake succeeds but the body
+  // always comes back empty. Measured through the VFS - GitHub raw, api.github,
+  // wikipedia, cloudflare, http2.golang.org all read 0 bytes, while HTTP/1.1
+  // hosts such as example.com return normally. Force 1.1 until h2 is understood.
+  g_curlInterface.easy_setopt(h, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+#else
   if (CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_curlDisableHTTP2)
     g_curlInterface.easy_setopt(h, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
   else
     // enable HTTP2 support. default: CURL_HTTP_VERSION_1_1. Curl >= 7.62.0 defaults to CURL_HTTP_VERSION_2TLS
     g_curlInterface.easy_setopt(h, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#endif
 
   // set CA bundle file
   std::string caCert = CSpecialProtocol::TranslatePath(

@@ -2832,3 +2832,41 @@ bug worth reporting upstream, and it is the same class as the DB repair trap.
 **Consequence for the backlog:** the guide UI is a dead end on this network. Live TV
 via the PVR client remains the only locally-controllable path, and its failure is a
 genuine port defect (see the entry above), not an upstream one.
+
+## 2026-11-19 - GitHub returns empty bodies through Kodi's VFS (cause not yet found)
+
+Symptom: `xbmcvfs.File("https://raw.githubusercontent.com/...")` opens without an
+exception but `read()` returns **0 bytes**. The same URL is fine from the console's
+Python urllib (200, N bytes) and from the PC. This matters because add-on
+repositories, playlists and update checks commonly live on GitHub.
+
+What was measured and ruled out:
+
+- **Not HTTP/2.** Forcing `CURL_HTTP_VERSION_1_1` under TARGET_SWITCH changed
+  nothing. (h2 hosts wikipedia/cloudflare/api.github/http2.golang.org all read 0,
+  HTTP/1.1 example.com reads 577 - but the force had no effect on the result.)
+- **Not brotli/zstd.** Forcing `CURLOPT_ACCEPT_ENCODING` to "identity" changed
+  nothing; the change was reverted.
+- **Not IPv6.** `AF_INET6` sockets are unsupported on the console (errno 106) but
+  `getaddrinfo` for these hosts returns AF_INET only, so curl never tries v6.
+  `<network><disableipv6>true</disableipv6>` had no effect either; removed.
+- **Not a curl perform error.** A trace in `PerformWithTransientRetries` logs any
+  non-OK `easy_perform` with its code and string. It did **not** fire for any GitHub
+  URL, while it did fire for genuine failures (`code=22 HTTP response code said
+  error`, `code=60 SSL peer certificate ... not OK`). So for GitHub the transfer is
+  considered successful and the body simply arrives empty.
+
+Not yet tried: component logging (LOGCURL) with debug level to see the transfer
+detail; a GitHub URL over plain http (redirects to https); another host on the same
+CDN; or comparing the exact request headers Kodi sends with the ones urllib sends.
+
+**Unrelated but confirmed in the same session:** `CCurlFile::Open ... Failed with
+code 0` covers several hosts (bit.ly, livetvbuilder.replit.app, magnetic.website,
+cdn.animationexplore.com). Those do log curl codes 22/60 and are separate issues
+from the empty-body GitHub case.
+
+**PVR status:** `PlayFile: gather=0` for a `pvr://` channel - the play request is
+accepted, the client returns 4 stream properties with err=0, and `ResolveChannel`
+succeeds. Execution then stops without a player open. Instrumented entry points
+(SwitchToChannel, parental, groupMember, StartPlayback, PlayEpgTag) all fire, so the
+break is after ResolveChannel.
