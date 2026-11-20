@@ -797,19 +797,11 @@ void CCurlFile::SetCommonOptions(CReadState* state, bool failOnError /* = true *
   g_curlInterface.easy_setopt(h, CURLOPT_BUFFERSIZE, 256L * 1024);
 #endif
 
-#if defined(TARGET_SWITCH)
-  // HTTP/2 becomes unusable on this port: the handshake succeeds but the body
-  // always comes back empty. Measured through the VFS - GitHub raw, api.github,
-  // wikipedia, cloudflare, http2.golang.org all read 0 bytes, while HTTP/1.1
-  // hosts such as example.com return normally. Force 1.1 until h2 is understood.
-  g_curlInterface.easy_setopt(h, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-#else
   if (CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_curlDisableHTTP2)
     g_curlInterface.easy_setopt(h, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
   else
     // enable HTTP2 support. default: CURL_HTTP_VERSION_1_1. Curl >= 7.62.0 defaults to CURL_HTTP_VERSION_2TLS
     g_curlInterface.easy_setopt(h, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
-#endif
 
   // set CA bundle file
   std::string caCert = CSpecialProtocol::TranslatePath(

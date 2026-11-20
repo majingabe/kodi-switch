@@ -2870,3 +2870,40 @@ accepted, the client returns 4 stream properties with err=0, and `ResolveChannel
 succeeds. Execution then stops without a player open. Instrumented entry points
 (SwitchToChannel, parental, groupMember, StartPlayback, PlayEpgTag) all fire, so the
 break is after ResolveChannel.
+
+## 2026-11-19 (late) - Correction: two independent problems, not an IP block
+
+The earlier "server blocks this network" conclusion was incomplete. Measured on the
+phone hotspot, with the PC moved onto it:
+
+    PC  (10.137.189.72)   SNI=thedaddy.li handshake OK, GET -> HTTP 200, real page
+    PC                    GitHub raw -> HTTP 200 (via Python)
+    console (10.137.189.11) xbmcvfs thedaddy.li        -> 0 bytes
+    console               xbmcvfs raw.githubusercontent -> 0 bytes
+    console               xbmcvfs example.com           -> 577 bytes
+
+So there are two separate faults:
+
+1. **The home IP is blocked by thedaddy.li.** On the home network the PC, a real
+   browser and the console all fail; on the hotspot the PC succeeds. DNS is clean,
+   TCP 443 connects, and the refusal comes as a TLS alert - so the site is deciding
+   by source address.
+2. **Kodi's curl returns an empty body for some hosts on any network.** thedaddy.li
+   and raw.githubusercontent.com both read 0 bytes through the VFS on the hotspot,
+   where the PC gets 200. example.com works. This is independent of egress.
+
+The perform trace added to `PerformWithTransientRetries` does **not** fire for
+either host, so curl does not consider these transfers failed; the open succeeds and
+the body is simply empty. Ruled out for this: HTTP/2 (forced 1.1, no change, patch
+reverted), brotli/zstd (identity, no change, reverted), IPv6 (unsupported and not
+attempted - getaddrinfo returns A records only), TLS verification (would be code 60
+and would log).
+
+Next step to identify it: trace the *successful* open path - log the HTTP response
+code and CURLINFO_CONTENT_LENGTH_DOWNLOAD at Open, then the first Read return value.
+That separates "server sent 200 with no body" from "body arrived but the read path
+drops it".
+
+**Practical consequence:** the Diggz guide needs both fixes - a permitted network
+(hotspot/VPN) *and* a working curl body path. The console on the hotspot still fails
+because of the second one.
