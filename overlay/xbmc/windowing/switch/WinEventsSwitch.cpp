@@ -14,9 +14,25 @@
 #include "messaging/ApplicationMessenger.h"
 #include "windowing/XBMC_events.h"
 
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 
 extern "C" void switch_trace(const char* msg);
+
+namespace
+{
+void SendKey(XBMCKey sym)
+{
+  XBMC_Event event{};
+  event.type = XBMC_KEYDOWN;
+  event.key.keysym.sym = sym;
+  CServiceBroker::GetInputManager().OnEvent(event);
+  event.type = XBMC_KEYUP;
+  event.key.keysym.sym = sym;
+  CServiceBroker::GetInputManager().OnEvent(event);
+}
+} // namespace
 
 CWinEventsSwitch::CWinEventsSwitch()
 {
@@ -74,6 +90,67 @@ bool CWinEventsSwitch::PumpTouch()
   return true;
 }
 
+bool CWinEventsSwitch::PumpStick()
+{
+  if (!padIsConnected(&m_pad))
+    return false;
+
+  const HidAnalogStickState stick = padGetStickPos(&m_pad, 0);
+
+  // ~1/3 of full deflection. Lower and a worn stick drifts; higher and diagonal
+  // menu movement feels unresponsive.
+  constexpr int deadzone = 11000;
+
+  int dir = 0;
+  if (std::abs(stick.x) > deadzone || std::abs(stick.y) > deadzone)
+  {
+    if (std::abs(stick.x) >= std::abs(stick.y))
+      dir = stick.x > 0 ? 2 : 4; // right : left
+    else
+      dir = stick.y > 0 ? 1 : 3; // up : down
+  }
+
+  if (dir == 0)
+  {
+    m_stickDir = 0;
+    return false;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+
+  if (dir != m_stickDir)
+  {
+    // New direction: emit immediately, then repeat while held.
+    m_stickDir = dir;
+    m_stickFirst = true;
+    m_stickNext = now;
+  }
+
+  if (now < m_stickNext)
+    return false;
+
+  switch (dir)
+  {
+    case 1:
+      SendKey(XBMCK_UP);
+      break;
+    case 2:
+      SendKey(XBMCK_RIGHT);
+      break;
+    case 3:
+      SendKey(XBMCK_DOWN);
+      break;
+    default:
+      SendKey(XBMCK_LEFT);
+      break;
+  }
+
+  m_stickNext = now + (m_stickFirst ? std::chrono::milliseconds(400)
+                                    : std::chrono::milliseconds(120));
+  m_stickFirst = false;
+  return true;
+}
+
 bool CWinEventsSwitch::MessagePump()
 {
   const bool touchHandled = PumpTouch();
@@ -93,54 +170,42 @@ bool CWinEventsSwitch::MessagePump()
     switch_trace(buf);
   }
 
+  bool handled = false;
+
   const u64 buttons = padGetButtonsDown(&m_pad);
-  if (buttons == 0)
-    return touchHandled;
-
-  auto sendKey = [](XBMCKey sym) {
-    XBMC_Event event{};
-    event.type = XBMC_KEYDOWN;
-    event.key.keysym.sym = sym;
-    CServiceBroker::GetInputManager().OnEvent(event);
-    event.type = XBMC_KEYUP;
-    CServiceBroker::GetInputManager().OnEvent(event);
-  };
-
-  bool handled = true;
-
   if (buttons & HidNpadButton_A)
-    sendKey(XBMCK_RETURN);
+    SendKey(XBMCK_RETURN);
   else if (buttons & HidNpadButton_B)
-    sendKey(XBMCK_ESCAPE);
+    SendKey(XBMCK_ESCAPE);
   else if (buttons & HidNpadButton_X)
-    sendKey(XBMCK_c);
+    SendKey(XBMCK_c);
   else if (buttons & HidNpadButton_Y)
-    sendKey(XBMCK_i);
+    SendKey(XBMCK_i);
   else if (buttons & HidNpadButton_Up)
-    sendKey(XBMCK_UP);
+    SendKey(XBMCK_UP);
   else if (buttons & HidNpadButton_Down)
-    sendKey(XBMCK_DOWN);
+    SendKey(XBMCK_DOWN);
   else if (buttons & HidNpadButton_Left)
-    sendKey(XBMCK_LEFT);
+    SendKey(XBMCK_LEFT);
   else if (buttons & HidNpadButton_Right)
-    sendKey(XBMCK_RIGHT);
+    SendKey(XBMCK_RIGHT);
   else if (buttons & HidNpadButton_L)
-    sendKey(XBMCK_PAGEUP);
+    SendKey(XBMCK_PAGEUP);
   else if (buttons & HidNpadButton_R)
-    sendKey(XBMCK_PAGEDOWN);
+    SendKey(XBMCK_PAGEDOWN);
   else if (buttons & HidNpadButton_ZL)
-    sendKey(XBMCK_MINUS);
+    SendKey(XBMCK_MINUS);
   else if (buttons & HidNpadButton_ZR)
-    sendKey(XBMCK_PLUS);
+    SendKey(XBMCK_PLUS);
   else if (buttons & HidNpadButton_Plus)
-    sendKey(XBMCK_SPACE);
+    SendKey(XBMCK_SPACE);
   else if (buttons & HidNpadButton_Minus)
-    sendKey(XBMCK_BACKSPACE);
-  else
-    handled = false;
+    SendKey(XBMCK_BACKSPACE);
 
-  if (handled)
-    return true;
+  if (buttons != 0)
+    handled = true;
 
-  return touchHandled;
+  const bool stickHandled = PumpStick();
+
+  return handled || stickHandled || touchHandled;
 }

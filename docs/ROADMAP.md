@@ -81,11 +81,11 @@ The renderer is 8-bit NV12 only. 10-bit output, HDR signalling and correct BT.20
 handling would need a different GLES path and, realistically, more GPU bandwidth than
 the stock clocks allow.
 
-**Analog sticks.** Not implemented at all today: `CWinEventsSwitch` reads buttons and the
-D-pad only, so the sticks do nothing. Two options — synthesise `XBMCK_UP/DOWN/LEFT/RIGHT`
-from the stick axes with a deadzone and a repeat timer (small, gets menu navigation
-working immediately), or feed Kodi's joystick API properly via an `IJoystickDriver`
-(bigger, gives per-axis mapping, analog scrolling and controller profiles).
+**Analog sticks.** — **DONE (2026-11-22).** `CWinEventsSwitch::PumpStick()` maps the left
+stick onto the four directional keys: ~1/3 deadzone, dominant axis wins, one press on
+entry then 400 ms delay and 120 ms repeat while held. The right stick is still unused.
+The proper `IJoystickDriver` route (per-axis mapping, analog scrolling, controller
+profiles) remains open if menu navigation ever needs more than this.
 
 **Better input.**
 Motion controls, rumble, and multiple controllers with per-player mapping are all

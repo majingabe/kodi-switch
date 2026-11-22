@@ -2907,3 +2907,20 @@ drops it".
 **Practical consequence:** the Diggz guide needs both fixes - a permitted network
 (hotspot/VPN) *and* a working curl body path. The console on the hotspot still fails
 because of the second one.
+
+## 2026-11-22 - Analog stick navigation (done, verified on hardware)
+
+`CWinEventsSwitch::PumpStick()` now reads the left stick with
+`padGetStickPos(&m_pad, 0)` and synthesises the four directional keys:
+
+- deadzone 11000 of 32767 (~1/3 deflection) - lower drifts with a worn stick,
+  higher makes diagonal movement feel dead
+- dominant axis wins, so a diagonal push produces one direction, not two
+- one key event on entry, then 400 ms delay and 120 ms repeat while held
+
+Menus only understand key events on this window system, so this is the cheap route
+the roadmap listed first. The right stick is untouched, and the full
+`IJoystickDriver` route (per-axis mapping, analog scrolling, controller profiles)
+remains available if navigation ever needs more.
+
+Verified by the user on hardware: stick steps one row and repeats when held.
