@@ -10,10 +10,12 @@
 
 #include "ServiceBroker.h"
 #include "input/InputManager.h"
-#include "input/mouse/MouseStat.h"
+#include "input/touch/generic/GenericTouchActionHandler.h"
+#include "input/touch/generic/GenericTouchInputHandler.h"
 #include "messaging/ApplicationMessenger.h"
 #include "windowing/XBMC_events.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -38,56 +40,102 @@ CWinEventsSwitch::CWinEventsSwitch()
 {
   padInitializeDefault(&m_pad);
   hidInitializeTouchScreen();
+
+  // Kodi's generic touch stack turns raw down/move/up into taps, long presses,
+  // pans and multi-finger gestures. Without this the only way to use the panel
+  // was to synthesise mouse events, which makes every skin draw a mouse pointer
+  // and turns taps into an indirect cursor dance.
+  CGenericTouchInputHandler::GetInstance().RegisterHandler(
+      &CGenericTouchActionHandler::GetInstance());
+  // Switch panel: 6.2" 1280x720 (~237 dpi) or 7" OLED (~210 dpi). 237 keeps the
+  // swipe detector's distance threshold honest on both.
+  CGenericTouchInputHandler::GetInstance().SetScreenDPI(237.0f);
+
   switch_trace("padInitializeDefault + touch init done");
+}
+
+CWinEventsSwitch::~CWinEventsSwitch()
+{
+  CGenericTouchInputHandler::GetInstance().UnregisterHandler();
 }
 
 bool CWinEventsSwitch::PumpTouch()
 {
   HidTouchScreenState state{};
-  if (hidGetTouchScreenStates(&state, 1) == 0 || state.count <= 0)
+  const size_t states = hidGetTouchScreenStates(&state, 1);
+  const int active = (states > 0) ? std::clamp(state.count, 0, 16) : 0;
+
+  const int64_t time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now().time_since_epoch())
+                           .count();
+
+  bool handled = false;
+  bool seen[TouchSlots] = {};
+
+  for (int i = 0; i < active; ++i)
   {
-    if (m_touchActive)
+    const HidTouchState& touch = state.touches[i];
+    const float x = static_cast<float>(touch.x);
+    const float y = static_cast<float>(touch.y);
+
+    // Keep a finger on the same Kodi pointer for its whole lifetime. Using the
+    // array index directly would shift every other finger when one lifts.
+    int slot = -1;
+    for (int s = 0; s < TouchSlots; ++s)
     {
-      m_touchActive = false;
-      XBMC_Event event{};
-      event.type = XBMC_MOUSEBUTTONUP;
-      event.button.button = XBMC_BUTTON_LEFT;
-      event.button.x = m_touchX;
-      event.button.y = m_touchY;
-      CServiceBroker::GetInputManager().OnEvent(event);
-      return true;
+      if (m_touchSlots[s].active && m_touchSlots[s].fingerId == touch.finger_id)
+      {
+        slot = s;
+        break;
+      }
     }
-    return false;
+    if (slot < 0)
+    {
+      for (int s = 0; s < TouchSlots; ++s)
+      {
+        if (!m_touchSlots[s].active)
+        {
+          slot = s;
+          break;
+        }
+      }
+    }
+    if (slot < 0)
+      continue; // Kodi's generic handler only supports two pointers.
+
+    seen[slot] = true;
+    if (!m_touchSlots[slot].active)
+    {
+      m_touchSlots[slot] = {touch.finger_id, true, x, y};
+      CGenericTouchInputHandler::GetInstance().HandleTouchInput(TouchInputDown, x, y, time, slot);
+      handled = true;
+    }
+    else if (x != m_touchSlots[slot].x || y != m_touchSlots[slot].y)
+    {
+      m_touchSlots[slot].x = x;
+      m_touchSlots[slot].y = y;
+      // This must come before HandleTouchInput. UpdateTouchPointer is what
+      // marks the finger as moving once it passes the threshold; without it
+      // the handler stays in "single touch" forever, so taps work but pans
+      // (list scrolling) never start.
+      CGenericTouchInputHandler::GetInstance().UpdateTouchPointer(slot, x, y, time);
+      CGenericTouchInputHandler::GetInstance().HandleTouchInput(TouchInputMove, x, y, time, slot);
+      handled = true;
+    }
   }
 
-  const HidTouchState& touch = state.touches[0];
-  const uint16_t x = static_cast<uint16_t>(touch.x);
-  const uint16_t y = static_cast<uint16_t>(touch.y);
-
-  if (!m_touchActive || x != m_touchX || y != m_touchY)
+  for (int s = 0; s < TouchSlots; ++s)
   {
-    m_touchX = x;
-    m_touchY = y;
-
-    XBMC_Event move{};
-    move.type = XBMC_MOUSEMOTION;
-    move.motion.x = x;
-    move.motion.y = y;
-    CServiceBroker::GetInputManager().OnEvent(move);
-
-    if (!m_touchActive)
+    if (m_touchSlots[s].active && !seen[s])
     {
-      m_touchActive = true;
-      XBMC_Event down{};
-      down.type = XBMC_MOUSEBUTTONDOWN;
-      down.button.button = XBMC_BUTTON_LEFT;
-      down.button.x = x;
-      down.button.y = y;
-      CServiceBroker::GetInputManager().OnEvent(down);
+      CGenericTouchInputHandler::GetInstance().HandleTouchInput(
+          TouchInputUp, m_touchSlots[s].x, m_touchSlots[s].y, time, s);
+      m_touchSlots[s].active = false;
+      handled = true;
     }
   }
 
-  return true;
+  return handled;
 }
 
 bool CWinEventsSwitch::PumpStick()

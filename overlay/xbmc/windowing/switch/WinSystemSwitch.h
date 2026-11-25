@@ -34,6 +34,7 @@ public:
   bool Hide() override;
   bool Show(bool raise = true) override;
   bool MessagePump() override;
+  bool HasCursor() override { return false; }
   std::unique_ptr<CVideoSync> GetVideoSync(CVideoReferenceClock* clock) override;
 
   const std::string GetName() override { return "switch"; }

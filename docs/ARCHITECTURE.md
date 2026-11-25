@@ -18,7 +18,7 @@ Platform classes Kodi expects:
 | Kodi interface | Switch implementation |
 |---|---|
 | `CWinSystemBase` | `CWinSystemSwitch` + `CWinSystemSwitchGLESContext` |
-| `IInputHandler` | `CWinEventsSwitch` (pad buttons + touch; **sticks not implemented**) |
+| `IInputHandler` | `CWinEventsSwitch` (pad buttons, analog stick mapped to direction keys, native touch gestures) |
 | `IAESink` | `CAESinkSwitch` (audout) |
 | Storage | `CSwitchStorageProvider` |
 | System info | `CSwitchSystemInfo` |

@@ -2924,3 +2924,37 @@ the roadmap listed first. The right stick is untouched, and the full
 remains available if navigation ever needs more.
 
 Verified by the user on hardware: stick steps one row and repeats when held.
+
+## 2026-11-25 - Estouchy pointer: native touch input instead of mouse emulation
+
+Estouchy looked like a mouse cursor being dragged because the port was feeding
+the panel into Kodi as synthetic mouse events. Kodi 22 already has the generic
+touch stack compiled for Switch (`input/touch` and `input/touch/generic` are in
+`cmake/treedata/switch/subdirs.txt`); the windowing layer simply never used it.
+Every touch therefore took the mouse path, and `skin.estouchy`'s `Pointer.xml`
+drew a cursor at the touch point.
+
+`CWinEventsSwitch` now registers `CGenericTouchActionHandler` with
+`CGenericTouchInputHandler` and feeds it real down/move/up events:
+
+- nanosecond timestamps from `steady_clock`;
+- one stable pointer slot per `finger_id`, so a second finger does not move the
+  first pointer when one lifts (the generic handler supports two pointers);
+- 237 dpi for the swipe detector (6.2" and OLED panels are close enough);
+- `CWinSystemSwitch::HasCursor()` returns false, so Kodi never opens the pointer
+  window. Taps are direct, drag pans, long-press is context menu, two-finger tap
+  is the mouse right-click mapping in `system/keymaps/touchscreen.xml`.
+
+The first cut still did not scroll. Taps only exercise down/up; panning needs
+Kodi to know the finger is moving. `HandleTouchInput(TouchInputMove, ...)` alone
+never sets `Pointer::moving` - the platform must call `UpdateTouchPointer()`
+first, which compares the current position with the down position and flips
+`moving` after the threshold. Without it the handler stays in single-touch mode
+forever. Both calls are now made for every move.
+
+The skin itself needed no changes. Estouchy 4.0.0 is installed and enabled; the
+active skin was Estuary at the time of writing.
+
+Deployed as `/switch/kodi.nro` on 2026-11-25 (old image kept as
+`/switch/kodi.nro.old`). User-verified: no cursor, taps land directly, and
+lists scroll and coast under the finger after the `UpdateTouchPointer` fix.

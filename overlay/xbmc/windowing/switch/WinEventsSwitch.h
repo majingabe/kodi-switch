@@ -10,7 +10,9 @@
 
 #include "windowing/WinEvents.h"
 
+#include <array>
 #include <chrono>
+#include <cstdint>
 
 #include <switch.h>
 
@@ -18,13 +20,23 @@ class CWinEventsSwitch : public IWinEvents
 {
 public:
   CWinEventsSwitch();
-  ~CWinEventsSwitch() override = default;
+  ~CWinEventsSwitch() override;
 
   bool MessagePump() override;
 
 private:
   bool PumpTouch();
   bool PumpStick();
+
+  static constexpr int TouchSlots = 2;
+
+  struct TouchSlot
+  {
+    uint32_t fingerId{0};
+    bool active{false};
+    float x{0.0f};
+    float y{0.0f};
+  };
 
   PadState m_pad{};
 
@@ -37,8 +49,7 @@ private:
 
   // Touchscreen state. The panel is only present in handheld mode and always
   // reports coordinates in its native 1280x720 space, which matches the
-  // handheld window 1:1.
-  bool m_touchActive{false};
-  uint16_t m_touchX{0};
-  uint16_t m_touchY{0};
+  // handheld window 1:1. A finger keeps its slot for its whole lifetime so
+  // multi-touch gestures do not jump when another finger lifts.
+  std::array<TouchSlot, TouchSlots> m_touchSlots{};
 };
