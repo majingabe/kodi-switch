@@ -2996,3 +2996,32 @@ Next measurement: boot, wait for the EPG/guide to finish loading, then open ABC
 News Live. If it plays, startup socket contention is the cause; if it still fails,
 disable the nonessential services (PlaylistBrowser, Google Drive, The Loop, Aeon/skin
 helpers) and retry. Do not tune `SocketInitConfig` until those two cases are separated.
+
+## 2026-11-25 - Live TV works: PVR HLS must use inputstream.adaptive, not ffmpeg
+
+The socket, property and path theories were all eliminated by direct tests. The
+same ABC/Tubi URL played with `xbmc.Player().play()` and with a plain ListItem
+carrying all four PVR stream properties. Copying the PVR item and rewriting
+`Path = DynPath` was also tried: the trace fired, but the player still failed.
+
+The actual difference is the PVR client's HLS inputstream selection. With
+`useInputstreamAdaptiveforHls=false`, `pvr.iptvsimple` returns
+`inputstream=inputstream.ffmpeg`. On this port that path fails on the
+redirect-heavy IPTV HLS URLs:
+
+    curl perform: code=22 (HTTP response code said error)
+    OpenDemuxStream - Error creating demuxer
+
+Setting `useInputstreamAdaptiveforHls=true` makes the client return
+`inputstream.adaptive`; `inputstream.adaptive` 22.3.24 is installed and the same
+channel then plays. Verified on hardware: ABC News Live opens, the active player
+is video, and the time advances (16:58 of 30:00 at the check).
+
+Packaging consequences:
+
+- the release package must bundle `inputstream.adaptive` (addon.xml, resources
+  and the static archive) or a fresh install has no adaptive engine;
+- the packaged PVR add-on's resource defaults for `useInputstreamAdaptiveforHls`
+  are now `true`, so fresh instances select adaptive. Existing instances keep
+  their saved value; the test console's instance was set to `true` explicitly.
+

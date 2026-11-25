@@ -48,6 +48,60 @@ else
 fi
 cp -a "$SRC/media" "$OUT/kodi/media"
 
+# Add-ons that live in the source tree but are not part of Kodi's CMake add-on
+# build. service.switch.repair re-applies the enabled state after a database rebuild.
+for extra in service.switch.repair; do
+  if [ -d "$SRC/addons/$extra" ] && [ ! -d "$OUT/kodi/addons/$extra" ]; then
+    cp -a "$SRC/addons/$extra" "$OUT/kodi/addons/"
+    echo "packaged extra add-on: $extra"
+  fi
+done
+
+# pvr.iptvsimple is a static binary add-on: generated addon.xml, resources, and
+# a zero-byte library file that satisfies Kodi's existence check before the shim
+# dispatches ADDON_Create.
+IPTV_SRC=${KODI_ROOT}/pvr.iptvsimple/pvr.iptvsimple
+IPTV_BUILD=${KODI_ROOT}/build-iptv/pvr.iptvsimple
+if [ -f "$IPTV_BUILD/addon.xml" ]; then
+  DEST="$OUT/kodi/addons/pvr.iptvsimple"
+  mkdir -p "$DEST"
+  cp -a "$IPTV_BUILD/addon.xml" "$DEST/addon.xml"
+  sed -i '/inputstream\.ffmpegdirect/d; /inputstream\.rtmp/d' "$DEST/addon.xml"
+  [ -d "$IPTV_SRC/resources" ] && cp -a "$IPTV_SRC/resources" "$DEST/resources"
+  [ -f "$IPTV_SRC/icon.png" ] && cp -a "$IPTV_SRC/icon.png" "$DEST/icon.png"
+  [ -f "$IPTV_SRC/changelog.txt" ] && cp -a "$IPTV_SRC/changelog.txt" "$DEST/changelog.txt"
+  : > "$DEST/pvr.iptvsimple.a"
+  # On this port Kodi's ffmpeg inputstream fails on redirect-heavy IPTV HLS
+  # URLs; inputstream.adaptive is the working path. Default fresh instances to
+  # adaptive while leaving an existing user's saved value alone.
+  python3 - "$DEST/resources/settings.xml" "$DEST/resources/instance-settings.xml" <<'PY'
+import os, re, sys
+for p in sys.argv[1:]:
+    if not os.path.exists(p):
+        continue
+    d = open(p).read()
+    d2 = re.sub(r'(<setting id="useInputstreamAdaptiveforHls".*?<default>)false(</default>)',
+                r'\1true\2', d, flags=re.S)
+    if d2 != d:
+        open(p, 'w').write(d2)
+        print('patched PVR HLS default: ' + p)
+PY
+  echo "packaged pvr.iptvsimple"
+fi
+
+# inputstream.adaptive is the HLS engine the PVR client needs. Built as a static
+# add-on with the same shim convention as pvr.iptvsimple.
+ISA_SRC=${KODI_ROOT}/build-isa/inputstream.adaptive
+ISA_LIB=${KODI_ROOT}/build-isa/inputstream.adaptive.a
+if [ -f "$ISA_SRC/addon.xml" ] && [ -f "$ISA_LIB" ]; then
+  DEST="$OUT/kodi/addons/inputstream.adaptive"
+  mkdir -p "$DEST"
+  cp -a "$ISA_SRC/addon.xml" "$DEST/addon.xml"
+  [ -d "$ISA_SRC/resources" ] && cp -a "$ISA_SRC/resources" "$DEST/resources"
+  cp -a "$ISA_LIB" "$DEST/inputstream.adaptive.a"
+  echo "packaged inputstream.adaptive"
+fi
+
 # CPython standard library, for the Python add-on support (PYTHONHOME=/switch/kodi/python).
 PYLIB=${KODI_ROOT}/pybuild/Python-3.14.6/Lib
 if [ -d "$PYLIB" ]; then
