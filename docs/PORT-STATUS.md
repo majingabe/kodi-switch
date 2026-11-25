@@ -2958,3 +2958,41 @@ active skin was Estuary at the time of writing.
 Deployed as `/switch/kodi.nro` on 2026-11-25 (old image kept as
 `/switch/kodi.nro.old`). User-verified: no cursor, taps land directly, and
 lists scroll and coast under the finger after the `UpdateTouchPointer` fix.
+
+## 2026-11-25 - Live TV: the player opens; startup socket contention, not the PVR handover
+
+The new IPTV playlist (`https://s.id/d9Kod` -> the `doms9/iptv` Kodi M3U) brings 654
+channels and a working, populated EPG. The earlier reading - "PlayFile accepts the
+item, then no player" - was incomplete. The `CApplicationPlayer::OpenFile` trace
+shows the real sequence:
+
+    AppPlayer::OpenFile newPlayer='VideoPlayer'
+    AppPlayer::OpenFile created player
+    AppPlayer::OpenFile calling VideoPlayer::OpenFile
+    AppPlayer::OpenFile VideoPlayer::OpenFile ret=1
+    ...
+    OpenDemuxStream - Error creating demuxer
+
+So the PVR -> player handover works. The failure is the first stream connection.
+`CCurlFile::Stat` on the channel URL returns `Could not connect to server(7)`.
+Immediately before the attempt, the log has
+`OSError: [Errno 105] No buffer space available` from the CloudDrive service.
+The preinit line reports **9 usable sockets**.
+
+The same boot starts a large set of background consumers:
+
+- PlaylistBrowser / DLHD service: parses 1,473, 2,903 and 2,600-channel playlists,
+  starts a relay on 127.0.0.1:8769, and repeatedly fails on FAT `os.replace`;
+- Google Drive/CloudDrive: source servers on ports 8585 and 8587, player, export
+  and download services;
+- The Loop analytics monitor;
+- Aeon Tajo helper, skin helper, multistaller, version check and a subtitle service.
+
+The EPG load at 17:06:07 succeeded (16,356 entries), so the socket pool recovered
+after the startup crunch. The failed stream attempt was at 17:05:50, during it.
+The same stream URLs are reachable from the PC, so this is not an unreachable host.
+
+Next measurement: boot, wait for the EPG/guide to finish loading, then open ABC
+News Live. If it plays, startup socket contention is the cause; if it still fails,
+disable the nonessential services (PlaylistBrowser, Google Drive, The Loop, Aeon/skin
+helpers) and retry. Do not tune `SocketInitConfig` until those two cases are separated.
